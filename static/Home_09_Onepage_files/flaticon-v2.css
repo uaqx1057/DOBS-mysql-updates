@@ -1,0 +1,233 @@
+@font-face {
+    font-family: "flaticon-v2";
+    src: url("../fonts/flaticon-v2.ttf") format("truetype"),
+url("../fonts/flaticon-v2.woff") format("woff"),
+url("../fonts/flaticon-v2.woff2") format("woff2"),
+url("../fonts/flaticon-v2.eot") format("embedded-opentype"),
+url("../fonts/flaticon-v2.svg") format("svg");
+}
+
+i[class^="flaticonv2-"]:before, i[class*=" flaticonv2-"]:before {
+    font-family: flaticon-v2 !important;
+    font-style: normal;
+    font-weight: normal !important;
+    font-variant: normal;
+    text-transform: none;
+    line-height: 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.flaticonv2-call:before {
+    content: "\f101";
+}
+.flaticonv2-email:before {
+    content: "\f102";
+}
+.flaticonv2-location:before {
+    content: "\f103";
+}
+.flaticonv2-webpage:before {
+    content: "\f104";
+}
+.flaticonv2-shield:before {
+    content: "\f105";
+}
+.flaticonv2-compliance:before {
+    content: "\f106";
+}
+.flaticonv2-compliant:before {
+    content: "\f107";
+}
+.flaticonv2-cloud:before {
+    content: "\f108";
+}
+.flaticonv2-id:before {
+    content: "\f109";
+}
+.flaticonv2-face-detection:before {
+    content: "\f10a";
+}
+.flaticonv2-worldwide:before {
+    content: "\f10b";
+}
+.flaticonv2-place:before {
+    content: "\f10c";
+}
+.flaticonv2-play-button:before {
+    content: "\f10d";
+}
+.flaticonv2-data-network:before {
+    content: "\f10e";
+}
+.flaticonv2-voip:before {
+    content: "\f10f";
+}
+.flaticonv2-database:before {
+    content: "\f110";
+}
+.flaticonv2-logistics:before {
+    content: "\f111";
+}
+.flaticonv2-shield-1:before {
+    content: "\f112";
+}
+.flaticonv2-global-shipping:before {
+    content: "\f113";
+}
+.flaticonv2-digital-marketing:before {
+    content: "\f114";
+}
+.flaticonv2-marketing:before {
+    content: "\f115";
+}
+.flaticonv2-right-arrow:before {
+    content: "\f116";
+}
+.flaticonv2-quotes:before {
+    content: "\f117";
+}
+.flaticonv2-double-right-arrows-angles:before {
+    content: "\f118";
+}
+.flaticonv2-office:before {
+    content: "\f119";
+}
+.flaticonv2-community:before {
+    content: "\f11a";
+}
+.flaticonv2-delivery-truck:before {
+    content: "\f11b";
+}
+.flaticonv2-pricing:before {
+    content: "\f11c";
+}
+.flaticonv2-plane:before {
+    content: "\f11d";
+}
+.flaticonv2-minus:before {
+    content: "\f11e";
+}
+.flaticonv2-target:before {
+    content: "\f11f";
+}
+.flaticonv2-free-shipping:before {
+    content: "\f120";
+}
+.flaticonv2-train:before {
+    content: "\f121";
+}
+.flaticonv2-deadline:before {
+    content: "\f122";
+}
+.flaticonv2-warehouse:before {
+    content: "\f123";
+}
+.flaticonv2-facebook-logo:before {
+    content: "\f124";
+}
+.flaticonv2-twitter:before {
+    content: "\f125";
+}
+.flaticonv2-instagram:before {
+    content: "\f126";
+}
+.flaticonv2-pinterest:before {
+    content: "\f127";
+}
+.flaticonv2-headphones:before {
+    content: "\f128";
+}
+.flaticonv2-telephone:before {
+    content: "\f129";
+}
+.flaticonv2-navigation:before {
+    content: "\f12a";
+}
+.flaticonv2-forklift:before {
+    content: "\f12b";
+}
+.flaticonv2-shipping:before {
+    content: "\f12c";
+}
+.flaticonv2-download-file:before {
+    content: "\f12d";
+}
+.flaticonv2-office-1:before {
+    content: "\f12e";
+}
+.flaticonv2-forklift-1:before {
+    content: "\f12f";
+}
+.flaticonv2-airplane:before {
+    content: "\f130";
+}
+.flaticonv2-rocket:before {
+    content: "\f131";
+}
+.flaticonv2-client:before {
+    content: "\f132";
+}
+.flaticonv2-goal:before {
+    content: "\f133";
+}
+.flaticonv2-team:before {
+    content: "\f134";
+}
+.flaticonv2-checkmark:before {
+    content: "\f135";
+}
+.flaticonv2-boat:before {
+    content: "\f136";
+}
+.flaticonv2-down-chevron:before {
+    content: "\f137";
+}
+.flaticonv2-appartment:before {
+    content: "\f138";
+}
+.flaticonv2-quote:before {
+    content: "\f139";
+}
+.flaticonv2-discount:before {
+    content: "\f13a";
+}
+.flaticonv2-shield-2:before {
+    content: "\f13b";
+}
+.flaticonv2-arrow:before {
+    content: "\f13c";
+}
+.flaticonv2-link:before {
+    content: "\f13d";
+}
+.flaticonv2-product:before {
+    content: "\f13e";
+}
+.flaticonv2-wallet:before {
+    content: "\f13f";
+}
+.flaticonv2-tick:before {
+    content: "\f140";
+}
+.flaticonv2-delivery:before {
+    content: "\f141";
+}
+.flaticonv2-package:before {
+    content: "\f142";
+}
+.flaticonv2-quote-1:before {
+    content: "\f143";
+}
+.flaticonv2-calendar:before {
+    content: "\f144";
+}
+.flaticonv2-dog-house:before {
+    content: "\f145";
+}
+.flaticonv2-delivery-1:before {
+    content: "\f146";
+}
+.flaticonv2-right-arrow-1:before {
+    content: "\f147";
+}

@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Driver Reports</title>
+  <link rel="icon" type="image/x-icon" href="static/Home_09_Onepage_files/logo1.png">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    /* Summary cards same height */
+    .summary-card {
+      min-height: 120px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+    }
+    .summary-card .card-title {
+      font-size: 0.9rem;
+    }
+    .summary-card .card-text {
+      font-size: 1.4rem;
+      font-weight: bold;
+    }
+    /* Table scroll on small screens */
+    .table-responsive {
+      max-height: 600px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body class="p-4">
+
+  <h2 class="mb-4">Driver Reports</h2>
+
+  <!-- ================== Filters ================== -->
+  <form method="POST" class="row g-3 mb-4">
+    <div class="col-md-2">
+      <select class="form-select" name="report_type">
+        <option value="onboarding" {% if report_type=='onboarding' %}selected{% endif %}>Onboarded</option>
+        <option value="pending_onboarding" {% if report_type=='pending_onboarding' %}selected{% endif %}>Pending Onboarding</option>
+        <option value="offboarding" {% if report_type=='offboarding' %}selected{% endif %}>Completed Offboarding</option>
+        <option value="pending_offboarding" {% if report_type=='pending_offboarding' %}selected{% endif %}>Pending Offboarding</option>
+        <option value="rejected" {% if report_type=='rejected' %}selected{% endif %}>Rejected</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <input type="date" class="form-control" name="start_date" value="{{ start_date or '' }}">
+    </div>
+    <div class="col-md-2">
+      <input type="date" class="form-control" name="end_date" value="{{ end_date or '' }}">
+    </div>
+    <div class="col-md-2">
+      <select class="form-select" name="city">
+        <option value="All" {% if city=='All' or not city %}selected{% endif %}>All Cities</option>
+        {% for c in saudi_cities %}
+          <option value="{{ c }}" {% if city==c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <select class="form-select" name="transfer_status">
+        <option value="" {% if transfer_status=='' or not transfer_status %}selected{% endif %}>All</option>
+        <option value="transferred" {% if transfer_status=='transferred' %}selected{% endif %}>Transferred</option>
+        <option value="not_transferred" {% if transfer_status=='not_transferred' %}selected{% endif %}>Not Transferred</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <button type="submit" class="btn btn-primary w-100">Generate</button>
+    </div>
+  </form>
+
+  <!-- ================== Summary Cards ================== -->
+  <div class="row mb-4 g-3">
+    <div class="col-md-2">
+      <div class="card bg-primary text-white summary-card">
+        <div class="card-body">
+          <div class="card-title">Total Drivers</div>
+          <div class="card-text">{{ total_drivers }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card bg-success text-white summary-card">
+        <div class="card-body">
+          <div class="card-title">Completed Onboarded</div>
+          <div class="card-text">{{ completed_onboarded }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card bg-warning text-dark summary-card">
+        <div class="card-body">
+          <div class="card-title">Pending Onboarded</div>
+          <div class="card-text">{{ pending_onboarded }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card bg-info text-white summary-card">
+        <div class="card-body">
+          <div class="card-title">Completed Offboarded</div>
+          <div class="card-text">{{ completed_offboarded }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card bg-warning text-dark summary-card">
+        <div class="card-body">
+          <div class="card-title">Pending Offboarded</div>
+          <div class="card-text">{{ pending_offboarded }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2">
+      <div class="card bg-danger text-white summary-card">
+        <div class="card-body">
+          <div class="card-title">Rejected Drivers</div>
+          <div class="card-text">{{ rejected_drivers }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================== Additional Reports ================== -->
+  <div class="row mb-4 g-3">
+    <div class="col-md-3">
+      <div class="card bg-secondary text-white summary-card">
+        <div class="card-body">
+          <div class="card-title">Monthly Transfers Completed</div>
+          <div class="card-text">{{ monthly_transfers_completed }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-9">
+      <div class="row g-3">
+        <div class="col-md-2">
+          <div class="card bg-primary text-white summary-card">
+            <div class="card-body">
+              <div class="card-title">Pending Ops Manager</div>
+              <div class="card-text">{{ pending_ops_manager }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-2">
+          <div class="card bg-success text-white summary-card">
+            <div class="card-body">
+              <div class="card-title">Pending HR</div>
+              <div class="card-text">{{ pending_hr }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-2">
+          <div class="card bg-warning text-dark summary-card">
+            <div class="card-body">
+              <div class="card-title">Pending Ops Supervisor</div>
+              <div class="card-text">{{ pending_ops_supervisor }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-2">
+          <div class="card bg-info text-white summary-card">
+            <div class="card-body">
+              <div class="card-title">Pending Fleet Manager</div>
+              <div class="card-text">{{ pending_fleet_manager }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-2">
+          <div class="card bg-danger text-white summary-card">
+            <div class="card-body">
+              <div class="card-title">Pending Finance</div>
+              <div class="card-text">{{ pending_finance }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================== Export Buttons ================== -->
+  <div class="mb-3">
+    <a href="{{ url_for('reports_bp.export_csv', report_type=report_type, start_date=start_date, end_date=end_date, city=city, transfer_status=transfer_status) }}" class="btn btn-outline-primary me-2">Export CSV</a>
+  <!--  <a href="{{ url_for('reports_bp.export_pdf', report_type=report_type, start_date=start_date, end_date=end_date, city=city, transfer_status=transfer_status) }}" class="btn btn-outline-danger">Export PDF</a> -->
+  </div>
+
+  <!-- ================== Drivers Table ================== -->
+  {% if drivers %}
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped">
+      <thead class="table-light">
+        <tr>
+          <th>ID</th>
+          <th>Full Name</th>
+          <th>Iqama Number</th>
+          <th>City</th>
+          <th>Platforms</th>
+          <th>Assignment Date</th>
+          <th>Transfer Done</th>
+          <th>Onboarding Stage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in drivers %}
+        <tr>
+          <td>{{ d.id }}</td>
+          <td>{{ d.name }}</td>
+          <td>{{ d.iqaama_number }}</td>
+          <td>{{ d.city }}</td>
+          <td>
+            {% if d.platforms %}
+              {% for p in d.platforms %}
+                {{ p.platform_name }}{% if not loop.last %}, {% endif %}
+              {% endfor %}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td>{{ d.assignment_date.strftime("%Y-%m-%d") if d.assignment_date else "" }}</td>
+
+          <!-- Transfer Done Badge -->
+          <td>
+            {% if d.sponsorship_transfer_status in ['Completed', 'Transferred', 'Approved'] %}
+              <span class="badge bg-success">Yes</span>
+            {% elif d.sponsorship_transfer_status == 'Pending' %}
+              <span class="badge bg-warning text-dark">No</span>
+            {% elif d.sponsorship_transfer_status == 'Not Required' %}
+              <span class="badge bg-secondary">N/A</span>
+            {% else %}
+              <span class="badge bg-secondary">Unknown</span>
+            {% endif %}
+          </td>
+
+
+          <!-- Onboarding Stage Badge -->
+          <td>
+            {% set stage = d.onboarding_stage or 'Pending' %}
+            {% if stage == 'Completed' %}
+              <span class="badge bg-success">{{ stage }}</span>
+            {% elif stage in ['Ops Manager', 'HR'] %}
+              <span class="badge bg-primary">{{ stage }}</span>
+            {% elif stage in ['Ops Supervisor', 'Fleet Manager'] %}
+              <span class="badge bg-info text-dark">{{ stage }}</span>
+            {% elif stage == 'Finance' %}
+              <span class="badge bg-warning text-dark">{{ stage }}</span>
+            {% elif stage == 'Rejected' %}
+              <span class="badge bg-danger">{{ stage }}</span>
+            {% else %}
+              <span class="badge bg-secondary">{{ stage }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p>No drivers found for selected filters.</p>
+  {% endif %}
+
+</body>
+</html>

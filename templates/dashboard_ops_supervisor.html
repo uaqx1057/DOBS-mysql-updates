@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ops Supervisor — Dashboard</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='Home_09_Onepage_files/logo1.png') }}">  
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='Finance_files/bootstrap1.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='Finance_files/style1.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='Finance_files/default.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard-common.css') }}">
+
+  <style>
+    /* ---------- layout & utility ---------- */
+    :root{
+      --bg:#e8eef5; --nav:#1a1a2e; --accent:#3498db; --ok:#27ae60; --danger:#e74c3c;
+      --primary:#602273; --primary-dark:#450f5c; --text-dark:#2c3e50; --text-light:#555;
+      --card-bg:#ffffff; --border:#cbd5e1; --shadow:0 2px 8px rgba(0,0,0,0.12);
+    }
+    *{box-sizing:border-box}
+    /* Core layout */
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); margin: 0; color: var(--text-dark); -webkit-font-smoothing:antialiased; }
+    .navbar { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); padding: 14px 20px; color: #fff; display:flex; justify-content:space-between; align-items:center; box-shadow:var(--shadow); }
+    .navbar a { color:#fff; text-decoration:none; margin-left:12px; font-weight:600; background:rgba(255,255,255,0.1); padding:8px 14px; border-radius:6px; transition:all 0.3s; }
+    .navbar a:hover { background:rgba(255,255,255,0.2); }
+    .container { padding: 24px; max-width:1200px; margin: 0 auto; }
+    h1{ margin:0 0 12px 0; font-size:24px; color:var(--text-dark); font-weight:600; }
+    .muted { color:#64748b; font-size:14px; }
+
+    /* Driver cards/grid */
+    .tab-container { display:flex; gap:8px; flex-wrap:wrap; margin-bottom: 16px; }
+    .tab-btn { background:#f1f5f9; border:2px solid var(--border); padding:10px 16px; border-radius:8px; cursor:pointer; font-weight:600; color:var(--text-light); transition:all 0.3s; }
+    .tab-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+    .tab-btn:hover { background:#e2e8f0; }
+    .driver-cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:18px; }
+    .driver-card { background:var(--card-bg); border-radius:10px; padding:16px; box-shadow:var(--shadow); cursor:pointer; border:1px solid var(--border); transition:transform 0.3s, box-shadow 0.3s; }
+    .driver-card:hover { transform:translateY(-2px); box-shadow:0 4px 16px rgba(0,0,0,0.15); }
+    .driver-card h3 { margin:0 0 10px; font-size:17px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .driver-card p { margin:6px 0; font-size:14px; color:var(--text-light); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+    /* Modal */
+    .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.65); align-items:center; justify-content:center; padding:18px; z-index:9999; }
+    .modal.show { display:flex; }
+    .modal-content { background:var(--card-bg); width:800px; max-width:100%; border-radius:12px; padding:24px; box-shadow:0 10px 50px rgba(0,0,0,0.25); max-height:90vh; overflow:auto; }
+    .modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:2px solid var(--border); padding-bottom:12px; }
+    .modal-header h2 { margin:0; }
+    .close { font-size:28px; cursor:pointer; border:none; background:none; color:var(--text-dark); transition:color 0.3s; }
+    .close:hover { color:#e74c3c; }
+
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    label { display:block; font-weight:600; margin-bottom:6px; font-size:14px; color:var(--text-dark); }
+    input[type="text"], input[type="number"], select, textarea { width:100%; padding:10px 12px; border-radius:8px; border:2px solid var(--border); box-sizing:border-box; font-size:14px; transition:border 0.3s; }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus, textarea:focus { outline:none; border-color:var(--primary); }
+    textarea { min-height:80px; resize:vertical; }
+    .btn { background:var(--primary); color:#fff; border:none; padding:12px 16px; border-radius:8px; cursor:pointer; font-weight:600; transition:all 0.3s; box-shadow:0 4px 12px rgba(96,34,115,0.3); }
+    .btn:hover { background:var(--primary-dark); transform:translateY(-2px); box-shadow:0 6px 16px rgba(96,34,115,0.4); }
+    .btn.secondary { background:#ccc; color:#222; }
+    .btn.danger { background:#e74c3c; box-shadow:0 4px 12px rgba(231,76,60,0.3); }
+    .btn.danger:hover { background:#c0392b; }
+    .small { font-size:14px; color:#64748b; }
+
+    .upload-thumb { max-width:100%; border-radius:8px; margin-top:8px; box-shadow:var(--shadow); }
+    .meta { font-size:13px; color:var(--text-light); }
+
+    /* quick stats */
+    .sidebar { padding:16px; border-radius:12px; background:var(--card-bg); box-shadow:var(--shadow); border:1px solid var(--border); }
+    .quick_item { padding:14px; border-bottom:1px solid var(--border); }
+    .quick_item h4 { margin:0; font-size:14px; color:#64748b; font-weight:600; }
+    .quick_item h3 { margin:8px 0 0 0; font-size:22px; color:var(--text-dark); font-weight:700; }
+
+    /* small helpers */
+    .muted-block{ color:#64748b; font-size:14px; margin-top:8px; }
+    .platform-list { font-size:14px; color:var(--text-dark); }
+    .platform-item { display:inline-block; margin-right:8px; background:#f1f5f9; padding:6px 10px; border-radius:8px; font-size:13px; font-weight:600; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <img src="{{ url_for('static', filename='DOBS.png') }}" alt="DOBS Logo" class="navbar-logo">
+      <span class="navbar-title">Ops Supervisor</span>
+    </div>
+    <div class="navbar-menu">
+      <span class="navbar-user">{{ current_user.name or current_user.username }} ({{ current_user.designation or current_user.role }})</span>
+      <button class="btn btn-secondary" onclick="openPasswordModal()">Change Password</button>
+      <a href="{{ url_for('public.set_language', lang='ar') }}" class="lang-switch">العربية</a>
+      <a href="{{ url_for('auth.logout') }}" class="btn btn-danger">Logout</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Drivers Management</h1>
+        <p class="page-subtitle">Manage drivers currently in Ops Supervisor stage and offboarding requests.</p>
+      </div>
+    </div>
+
+    <!-- Flash messages -->
+    <div class="flash-container">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash-message flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+    </div>
+
+    <div class="card">
+      <div class="tabs-container">
+        <div class="tab-buttons">
+          <button class="tab-btn active" id="tabOnboardingBtn" onclick="showTab('onboarding')">Onboarding</button>
+          <button class="tab-btn" id="tabOffboardingBtn" onclick="showTab('offboarding')">Offboarding</button>
+        </div>
+      </div>
+
+        <!-- ONBOARDING TAB -->
+        <div id="onboardingTab">
+          {% if onboarding_drivers %}
+            <div class="driver-cards">
+              {% for driver in onboarding_drivers %}
+                <div class="driver-card"
+                     onclick="openDriverModal(this)"
+                     data-driver='{{ {
+                       "id": driver.id,
+                       "name": driver.name,
+                       "iqama_number": driver.iqaama_number if driver.iqaama_number is defined else (driver.iqama_number if driver.iqama_number is defined else ''),
+                       "iqama_expiry": (driver.iqaama_expiry.strftime('%Y-%m-%d') if driver.iqaama_expiry else '') if driver.iqaama_expiry is defined else (driver.iqaama_expiry.strftime('%Y-%m-%d') if driver.iqaama_expiry else ''),
+                       "nationality": driver.nationality or "",
+                       "mobile": driver.issued_mobile_number or driver.absher_number or "",
+                       "previous_sponsor_number": driver.previous_sponsor_number or "",
+                       "iqama_card_upload": driver.iqama_card_upload or "",
+                       "city": driver.city or "",
+                       "issued_mobile_number": driver.issued_mobile_number or "",
+                       "issued_device_id": driver.issued_device_id or "",
+                       "mobile_issued": bool(driver.mobile_issued),
+                       "ops_manager_approved_at": (driver.ops_manager_approved_at.strftime('%Y-%m-%d %H:%M') if driver.ops_manager_approved_at else ""),
+                       "hr_approved_at": (driver.hr_approved_at.strftime('%Y-%m-%d %H:%M') if driver.hr_approved_at else "")
+                     } | tojson | safe }}'>
+                  <h3>{{ driver.name }}</h3>
+                  <p><strong>Iqama:</strong> {{ driver.iqaama_number or driver.iqama_number or '' }}</p>
+                  <p class="small"><strong>City:</strong> {{ driver.city or "N/A" }}</p>
+                  <p class="small"><strong>Stage:</strong> {{ driver.onboarding_stage }}</p>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="muted-block">No drivers are pending at this stage.</p>
+          {% endif %}
+        </div>
+
+        <!-- DRIVER MODAL (Approve & assign businesses) -->
+<!-- DRIVER MODAL (Approve & assign businesses) -->
+<div id="driverModal" class="modal" aria-hidden="true">
+  <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="driverModalTitle">
+    <div class="modal-header">
+      <h3 id="driverModalTitle">Driver details</h3>
+      <button class="close" onclick="closeDriverModal()">&times;</button>
+    </div>
+
+    <div id="driverInfoArea"></div>
+
+    <form id="approveForm" method="POST">
+      <h4>Assign Businesses / Platforms</h4>
+      <div id="businessContainer"></div>
+      <button type="button" id="addBusinessBtn" class="btn secondary" style="margin-top:8px;">+ Add business</button>
+
+      <div style="margin-top:12px;">
+        <label>Issued Company Mobile Number (optional)</label>
+        <input type="text" name="issued_mobile_number" id="issued_mobile_number" placeholder="e.g. +9665xxxx">
+
+        <label style="margin-top:8px;">Issued Device ID / IMEI (optional)</label>
+        <input type="text" name="issued_device_id" id="issued_device_id" placeholder="Device IMEI / Serial">
+
+        <label style="margin-top:8px;"><input type="checkbox" id="mobile_issued" name="mobile_issued"> Mobile & SIM Issued</label>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <button type="submit" class="btn">✅ Approve & Send to Fleet Manager</button>
+        <button type="button" class="btn secondary" onclick="closeDriverModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+
+
+<script>
+const allBusinesses = {{ all_businesses | tojson | safe }};
+
+function addBusinessRow(selectedBusinessId = '', selectedId = '') {
+  const container = document.getElementById('businessContainer');
+
+  const row = document.createElement('div');
+  row.style.display = 'flex';
+  row.style.gap = '8px';
+  row.style.marginTop = '8px';
+
+  // ----- Business select -----
+  const selBusiness = document.createElement('select');
+  selBusiness.style.flex = '1';
+  selBusiness.style.padding = '8px';
+  selBusiness.style.borderRadius = '6px';
+  selBusiness.style.border = '1px solid #ccc';
+  selBusiness.required = true;
+
+  const defaultBusinessOpt = document.createElement('option');
+  defaultBusinessOpt.value = '';
+  defaultBusinessOpt.text = '-- Select Business --';
+  selBusiness.appendChild(defaultBusinessOpt);
+
+  allBusinesses.forEach(b => {
+    const opt = document.createElement('option');
+    opt.value = b.id;
+    opt.text = b.name;
+    if (String(b.id) === String(selectedBusinessId)) opt.selected = true;
+    selBusiness.appendChild(opt);
+  });
+
+  // ----- ID select -----
+  const selId = document.createElement('select');
+  selId.name = 'platform_id[]'; // only this gets submitted
+  selId.required = true;
+  selId.style.flex = '1';
+  selId.style.padding = '8px';
+  selId.style.borderRadius = '6px';
+  selId.style.border = '1px solid #ccc';
+
+  const defaultIdOpt = document.createElement('option');
+  defaultIdOpt.value = '';
+  defaultIdOpt.text = '-- Select ID --';
+  selId.appendChild(defaultIdOpt);
+
+  // Populate IDs if a business is preselected
+  function populateIds(businessId) {
+    selId.innerHTML = ''; // clear old options
+    selId.appendChild(defaultIdOpt.cloneNode(true));
+
+    const business = allBusinesses.find(b => String(b.id) === String(businessId));
+    if (business) {
+      business.available_ids.forEach(idObj => {
+        const opt = document.createElement('option');
+        opt.value = idObj.id; // this is what Flask expects
+        opt.text = idObj.value;
+        if (String(idObj.id) === String(selectedId)) opt.selected = true;
+        selId.appendChild(opt);
+      });
+    }
+  }
+
+  if (selectedBusinessId) populateIds(selectedBusinessId);
+
+  selBusiness.addEventListener('change', e => {
+    populateIds(e.target.value);
+  });
+
+  // ----- Remove button -----
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'btn secondary';
+  delBtn.innerText = 'Remove';
+  delBtn.style.width = '20%';   // updated width
+  delBtn.addEventListener('click', () => row.remove());
+
+  row.appendChild(selBusiness);
+  row.appendChild(selId);
+  row.appendChild(delBtn);
+  container.appendChild(row);
+}
+
+
+// Add first row on modal open or on +Add click
+document.getElementById('addBusinessBtn').addEventListener('click', () => addBusinessRow());
+
+
+
+</script>
+
+
+        <!-- OFFBOARDING TAB -->
+        <div id="offboardingTab" style="display:none;">
+          <div style="margin-top:6px;">
+            <div style="margin-bottom:12px;">
+              <input type="text" id="offboardingSearch" placeholder="Search driver by name or Iqama..." oninput="filterOffboarding()" style="width:100%; padding:8px; border-radius:6px; border:1px solid #ccc;">
+            </div>
+
+            <div class="driver-cards" id="offboardingCards">
+              {% if offboarding_requests %}
+                {% for record in offboarding_requests %}
+                  <div class="driver-card offboarding-card" onclick="openOffboardingModal(this)" data-off-id="{{ record.id }}">
+                    <h3>{{ record.driver.name }}</h3>
+                    <p><strong>Iqama:</strong> {{ record.driver.iqaama_number or record.driver.iqama_number or record.driver.iqama_number }}</p>
+                    <p><strong>Requested At:</strong> {{ record.requested_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                    <p class="platform-list">
+                      {% set ba_list = record.driver.business_assignments %}
+                      {% if ba_list %}
+                        {% for ba in ba_list %}
+                          <span class="platform-item">{{ ba.business.name if ba.business is defined else ba.business_id }}</span>
+                        {% endfor %}
+                      {% else %}
+                        <span class="small muted">No business assignments</span>
+                      {% endif %}
+                    </p>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="muted-block">No offboarding requests at this stage.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <!-- OFFBOARDING MODAL -->
+        <div id="offboardingModal" class="modal" aria-hidden="true">
+          <div class="modal-content" role="dialog">
+            <div class="modal-header">
+              <h3 id="offModalTitle">Offboarding Clearance</h3>
+              <button class="close" onclick="closeOffboardingModal()">&times;</button>
+            </div>
+            <form id="offboardingForm">
+              <div class="grid">
+                <div>
+                  <p><strong>Driver:</strong> <span id="off_driver_name"></span></p>
+                  <p><strong>Iqama:</strong> <span id="off_iqama"></span></p>
+                  <p><strong>Requested:</strong> <span id="off_requested"></span></p>
+                  <p><strong>Businesses:</strong> <span id="off_businesses"></span></p>
+                </div>
+                <div>
+                  <label><input type="checkbox" name="company_mobile_returned"> Company Mobile Returned</label><br>
+                  <label><input type="checkbox" name="company_sim_returned"> Company SIM Returned</label><br>
+                  <label><input type="checkbox" name="platform_returned"> Platform / Business Account Returned</label><br>
+                  <label style="margin-top:8px;">Notes</label>
+                  <textarea name="ops_supervisor_note" placeholder="Enter notes..."></textarea>
+                </div>
+              </div>
+
+              <div style="display:flex; gap:8px; margin-top:12px;">
+                <button type="submit" class="btn">✅ Confirm & Send to Fleet</button>
+                <button type="button" class="btn secondary" onclick="closeOffboardingModal()">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Sidebar / Quick stats -->
+<div class="col-lg-12" style="width: 20%;">
+<div class="single_element">
+<div class="quick_activity">
+<div class="row">
+<div class="col-12">
+<div class="quick_activity_wrap" style="display: grid;grid-template-columns: repeat(1, 1fr);">
+<div style="display: grid;grid-gap: 10px;grid-template-columns: repeat(1, 1fr);">
+<div class="single_quick_activity" style=" padding: 10px 20px;">
+<h4>Drivers in the onboarding tab:</h4>
+<h3> <span class="counter">{{ total_drivers or 0 }}</span> </h3>
+</div>
+<div class="single_quick_activity" style=" padding: 10px 20px;">
+<h4>Drivers in the Offboarding Tab:</h4>
+<h3><span class="counter">{{ total_users or 0 }}</span> </h3>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+    </div>
+  </div>
+
+  <!-- PASSWORD MODAL -->
+  <div id="passwordModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Change Password</h3>
+        <button class="close" onclick="closePasswordModal()">&times;</button>
+      </div>
+      <form method="POST" action="{{ url_for('ops_supervisor.change_password') }}">
+        <label>Current password</label>
+        <input type="password" name="current_password" required>
+        <label>New password</label>
+        <input type="password" name="new_password" required>
+        <label>Confirm new password</label>
+        <input type="password" name="confirm_password" required>
+        <div style="margin-top:12px; display:flex; gap:8px;">
+          <button type="submit" class="btn">Update Password</button>
+          <button type="button" class="btn secondary" onclick="closePasswordModal()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- JS -->
+  <script>
+    // all_businesses is optional from backend; default to empty array to avoid template errors
+
+    // Utility: safe parse
+    function safeParseJSON(s){
+      try { return JSON.parse(s); } catch(e) { return {}; }
+    }
+
+    // ---------- Tabs ----------
+    function showTab(tab){
+      document.getElementById('onboardingTab').style.display = tab === 'onboarding' ? 'block' : 'none';
+      document.getElementById('offboardingTab').style.display = tab === 'offboarding' ? 'block' : 'none';
+      document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+      if(tab === 'onboarding') document.getElementById('tabOnboardingBtn').classList.add('active');
+      else document.getElementById('tabOffboardingBtn').classList.add('active');
+    }
+
+    // ---------- Driver modal / assign businesses ----------
+    function openDriverModal(card){
+      const d = safeParseJSON(card.getAttribute('data-driver'));
+      document.getElementById('driverModalTitle').innerText = 'Process: ' + (d.name || 'Driver');
+      let info = '';
+      info += `<div class="approval-info"><strong>Ops Manager Approved:</strong> ${d.ops_manager_approved_at || '❌ Not Approved'}</div>`;
+      info += `<div class="approval-info"><strong>HR Approved:</strong> ${d.hr_approved_at || '❌ Not Approved'}</div>`;
+      info += `<p><strong>Iqama:</strong> ${d.iqama_number || 'N/A'}</p>`;
+      info += `<p><strong>Nationality:</strong> ${d.nationality || 'N/A'}</p>`;
+      info += `<p><strong>Mobile:</strong> ${d.mobile || 'N/A'}</p>`;
+      info += `<p><strong>City:</strong> ${d.city || 'N/A'}</p>`;
+      if(d.iqama_card_upload) info += `<p><img src="/${encodeURIComponent(d.iqama_card_upload)}" class="upload-thumb"></p>`;
+      document.getElementById('driverInfoArea').innerHTML = info;
+
+      // Approve form action
+      const form = document.getElementById('approveForm');
+      form.action = `/dashboard/ops_supervisor/approve_driver/${d.id}`;
+
+      // clear & add one business row
+      const container = document.getElementById('businessContainer');
+      container.innerHTML = '';
+      addBusinessRow(); // start with one
+      // prefill issued fields
+      document.getElementById('issued_mobile_number').value = d.issued_mobile_number || '';
+      document.getElementById('issued_device_id').value = d.issued_device_id || '';
+      document.getElementById('mobile_issued').checked = !!d.mobile_issued;
+
+      document.getElementById('driverModal').classList.add('show');
+    }
+
+    function closeDriverModal(){ document.getElementById('driverModal').classList.remove('show'); }
+
+    // Build business row (select of businesses + business_id hidden field)
+// Build business row (select of businesses + business ID select)
+
+    document.getElementById('addBusinessBtn').addEventListener('click', ()=> addBusinessRow());
+
+    // Approve form submit: ensure at least one business selected
+  // Approve form submit: ensure at least one platform_id is chosen
+  document.getElementById('approveForm').addEventListener('submit', function(evt){
+    const selects = Array.from(this.querySelectorAll('select[name="platform_id[]"]')); // <- correct name
+    const ok = selects.some(s => s.value && s.value !== '');
+    if(!ok){
+      alert('Please choose at least one business (and its ID).');
+      evt.preventDefault();
+      return false;
+    }
+    // normal submit — server route will handle saving DriverBusiness etc.
+  });
+
+
+    // ---------- Offboarding modal ----------
+    let currentOffId = null;
+    function openOffboardingModal(card){
+      currentOffId = card.getAttribute('data-off-id');
+      const name = card.querySelector('h3').innerText;
+      const iqama = card.querySelector('p strong + text, p').innerText || card.querySelector('p').innerText; // fallback
+      document.getElementById('offModalTitle').innerText = 'Offboarding: ' + name;
+      document.getElementById('off_driver_name').innerText = name;
+      // find requested at text
+      const requestedText = Array.from(card.querySelectorAll('p')).find(p=>p.innerText.includes('Requested At'))?.innerText || '';
+      document.getElementById('off_requested').innerText = requestedText.replace('Requested At:','').trim() || '';
+      // businesses text
+      const businessEls = card.querySelectorAll('.platform-item');
+      const businessNames = Array.from(businessEls).map(el => el.innerText).join(', ') || 'N/A';
+      document.getElementById('off_businesses').innerText = businessNames;
+      // iqama (explicit)
+      const iqamaEl = Array.from(card.querySelectorAll('p')).find(p=>p.innerText.includes('Iqama:'));
+      document.getElementById('off_iqama').innerText = iqamaEl ? iqamaEl.innerText.replace('Iqama:','').trim() : '';
+      document.getElementById('offboardingModal').classList.add('show');
+    }
+
+    function closeOffboardingModal(){ document.getElementById('offboardingModal').classList.remove('show'); currentOffId = null; }
+
+    // Offboarding form submit via API
+    document.getElementById('offboardingForm').addEventListener('submit', async function(e){
+      e.preventDefault();
+      if(!currentOffId){ alert('No offboarding selected'); return; }
+      if(!confirm('Confirm clearance and send to Fleet Manager?')) return;
+
+      const formData = new FormData(this);
+      const payload = Object.fromEntries(formData.entries());
+      payload.company_mobile_returned = formData.has('company_mobile_returned');
+      payload.company_sim_returned = formData.has('company_sim_returned');
+      payload.platform_returned = formData.has('platform_returned');
+
+      try{
+        const res = await fetch(`/dashboard/ops_supervisor/api/clear_offboarding/${currentOffId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if(data.success){
+          alert('Cleared and sent to Fleet ✅');
+          location.reload();
+        } else {
+          alert(data.message || 'Failed to clear offboarding.');
+        }
+      }catch(err){
+        console.error(err);
+        alert('Server error. Check console.');
+      }
+    });
+
+    // Search filter for offboarding cards
+    function filterOffboarding(){
+      const q = (document.getElementById('offboardingSearch').value || '').toLowerCase();
+      document.querySelectorAll('#offboardingCards .offboarding-card').forEach(card=>{
+        const text = card.innerText.toLowerCase();
+        card.style.display = text.includes(q) ? '' : 'none';
+      });
+    }
+
+    // Close modals on outside click / ESC
+    window.addEventListener('click', e => {
+      if(e.target.classList && e.target.classList.contains('modal')) {
+        e.target.classList.remove('show');
+      }
+    });
+    window.addEventListener('keydown', e => { if(e.key === 'Escape') document.querySelectorAll('.modal.show').forEach(m=>m.classList.remove('show')); });
+
+    // ---------- Password modal ----------
+    function openPasswordModal(){ document.getElementById('passwordModal').classList.add('show'); }
+    function closePasswordModal(){ document.getElementById('passwordModal').classList.remove('show'); }
+  </script>
+</body>
+</html>

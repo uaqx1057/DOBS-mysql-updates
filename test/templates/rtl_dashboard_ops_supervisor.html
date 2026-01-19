@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>لوحة تحكم مشرف العمليات</title>
+<link href="./Home 09 (Onepage)_files/logo1.png" rel="icon" type="image/x-icon"/>
+<link href="{{ url_for('static', filename='styles.css') }}" rel="stylesheet"/>
+<link href="{{ url_for('static', filename='Finance_files/bootstrap1.min.css') }}" rel="stylesheet"/>
+<link href="{{ url_for('static', filename='Finance_files/style1.css') }}" rel="stylesheet"/>
+<link href="{{ url_for('static', filename='Finance_files/default.css') }}" rel="stylesheet"/>
+<style>
+    body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; }
+    .navbar { background: #602273; padding: 15px; color: white; display: flex; justify-content: space-between; align-items: center; }
+    .navbar a { color: white; margin: 0 10px; text-decoration: none; font-weight: bold; cursor: pointer; }
+    .container { padding: 20px; }
+
+    h2 { margin-top: 10px; color: #2c3e50; }
+
+    .driver-card {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 0 6px #ccc;
+      margin-bottom: 12px;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .driver-card:hover { transform: scale(1.02); background: #fbfbfb; }
+
+    /* Modal Styling */
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 999; }
+    .modal.show { display: flex; }
+    .modal-content {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      width: 500px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 6px 30px rgba(0,0,0,0.3);
+    }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .close { cursor: pointer; font-size: 22px; font-weight: bold; }
+
+    label { display: block; margin: 8px 0 4px; font-weight: bold; font-size: 14px; }
+    input, select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 5px; }
+    input[readonly] { background: #f0f0f0; }
+    .tab-btn { background:#fff; width: 25%; border:1px solid #ccc; padding:8px 12px; margin-right:6px; border-radius:6px; cursor:pointer; }
+    .tab-btn.active { background:#602273; color:#fff; }
+  
+
+    img.driver-iqama { max-width: 100%; margin-top: 8px; border-radius: 6px; box-shadow: 0 0 5px #aaa; }
+
+    .approval-info {
+      font-size: 13px;
+      color: #2c3e50;
+      background: #eafaf1;
+      padding: 6px;
+      border-radius: 5px;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body dir="rtl" style="font-family: Tajawal, sans-serif; direction: rtl; text-align: right;">
+<div class="navbar">
+<div style="display:flex; align-items:center; gap:10px;">
+<img alt="Logo" src="{{ url_for('static', filename='DOBS.png') }}" style="width:40%;"/>
+</div>
+<div>
+  <a href="{{ url_for('set_language', lang='en') }}" class="btn btn-sm btn-outline-primary">English</a>
+
+<span class="small">{{ current_user.name or current_user.username }} ({{ current_user.role }})</span>
+<a href="javascript:void(0)" onclick="openPasswordModal()">تغيير كلمة المرور</a>
+<a href="{{ url_for('auth.logout') }}">تسجيل الخروج</a>
+</div>
+</div>
+<div class="container">
+<div>
+<h1>إدارة السائقين</h1>
+<div class="muted">إدارة السائقين (قيد الانتظار والمكتمل).</div>
+</div>
+<div style="display: flex; column-gap: 18px;">
+<div style="width: 100%;  border-radius: 20px;padding: 20px;border: 1px solid #ccc;background-color: #60227338;">
+<div class="tab-container" style="display: flex;">
+<button class="tab-btn active" onclick="showTab('onboarding')" style="margin: 10px;">الانخراط أو التهيئة</button>
+<button class="tab-btn" onclick="showTab('offboarding')" style="margin: 10px;">إنهاء الخدمة</button>
+</div>
+<div id="onboardingTab">
+<div class="container" style="display: flex;">
+              {% if onboarding_drivers %}
+                {% for driver in onboarding_drivers %}
+                  <div class="driver-card" data-driver='{{ {
+                      "id": driver.id,
+                      "full_name": driver.full_name,
+                      "iqama_number": driver.iqama_number,
+                      "iqama_expiry_date": driver.iqama_expiry_date.strftime("%Y-%m-%d") if driver.iqama_expiry_date else "",
+                      "nationality": driver.nationality or "",
+                      "mobile_number": driver.mobile_number or "",
+                      "previous_sponsor_number": driver.previous_sponsor_number or "",
+                      "saudi_driving_license": driver.saudi_driving_license,
+                      "city": driver.city or "",
+                      "platforms": driver.platforms or [],
+                      "platform_ids": driver.platform_ids or [],
+                      "issued_mobile_number": driver.issued_mobile_number or "",
+                      "issued_device_id": driver.issued_device_id or "",
+                      "mobile_issued": driver.mobile_issued or false,
+                      "iqama_card_upload": driver.iqama_card_upload or "",
+                      "ops_manager_approved_at": driver.ops_manager_approved_at.strftime("%Y-%m-%d %H:%M") if driver.ops_manager_approved_at else "",
+                      "hr_approved_at": driver.hr_approved_at.strftime("%Y-%m-%d %H:%M") if driver.hr_approved_at else ""
+                    } | tojson | safe }}' onclick="openModal(this)" >
+<h3>{{ driver.full_name }}</h3>
+<p><strong>إقامة:</strong> {{ driver.iqama_number }}</p>
+<p><strong>مرحلة:</strong> {{ driver.onboarding_stage }}</p>
+</div>
+                {% endfor %}
+              {% else %}
+                <p>لا يوجد سائقون قيد الانتظار في هذه المرحلة.</p>
+              {% endif %}
+          </div>
+<!-- Driver Details Modal -->
+<div class="modal" id="driverModal">
+<div class="modal-content">
+<div class="modal-header">
+<h3 id="driverName">تفاصيل السائق</h3>
+<span class="close" onclick="closeModal()">×</span>
+</div>
+<div id="driverDetails"></div>
+<form action="#" id="opsForm" method="POST">
+<h4>إجراء مشرف العمليات</h4>
+<h4>تعيين المنصات</h4>
+<div id="platformContainer">
+<!-- platform rows will be dynamically inserted -->
+</div>
+<button id="addPlatformBtn" type="button">+ إضافة منصة</button>
+<label>رقم الهاتف المحمول الصادر عن الشركة (اختياري)</label>
+<input id="issued_mobile_number" name="issued_mobile_number" placeholder="أدخل رقم الهاتف المحمول الصادر" type="text"/>
+<label>معرّف الجهاز الصادر (اختياري)</label>
+<input id="issued_device_id" name="issued_device_id" placeholder="أدخل رقم IMEI/الرقم التسلسلي للجهاز" type="text"/>
+<label>
+<input id="mobile_issued" name="mobile_issued" type="checkbox"/>
+                  جوال &amp; تم إصدار بطاقة SIM
+                </label>
+<button  style="border-radius: 10px;background: #b5ddb5;padding: 5px;"disabled="" id="approveBtn" type="submit" >✅ يوافق &amp; إرسال إلى مدير الأسطول</button>
+</form>
+</div>
+</div>
+<script>
+            function openModal(card) {
+              const d = JSON.parse(card.dataset.driver);
+              document.getElementById("driverName").innerText = "Processing: " + d.full_name;
+
+              let html = `
+                <div class="approval-info"><strong>تمت الموافقة من قبل مدير العمليات:</strong> ${d.ops_manager_approved_at || "❌ Not Approved"}</div>
+                <div class="approval-info"><strong>تمت الموافقة من إدارة الموارد البشرية:</strong> ${d.hr_approved_at || "❌ Not Approved"}</div>
+                <p><strong>رقم الإقامة:</strong> ${d.iqama_number}</p>
+                <p><strong>انتهاء الإقامة:</strong> ${d.iqama_expiry_date || "N/A"}</p>
+                <p><strong>الجنسية:</strong> ${d.nationality || "N/A"}</p>
+                <p><strong>الكفيل السابق:</strong> ${d.previous_sponsor_number || "N/A"}</p>
+                <p><strong>رقم جوال السائق:</strong> ${d.mobile_number || "N/A"}</p>
+                <p><strong>مدينة:</strong> ${d.city || "N/A"}</p>`;
+              if (d.iqama_card_upload) {
+                html += `<p><img src="/static/uploads/${d.iqama_card_upload}" class="driver-iqama"></p>`;
+              }
+              document.getElementById("driverDetails").innerHTML = html;
+
+              // Set form action
+              document.getElementById("opsForm").action = `/dashboard/ops_supervisor/approve_driver/${d.id}`;
+
+              // Clear existing platform rows
+              const container = document.getElementById("platformContainer");
+              container.innerHTML = "";
+
+              // Prefill platforms if present
+              if (d.platforms && d.platforms.length) {
+                for (let i = 0; i < d.platforms.length; i++) {
+                  addPlatformRow(d.platforms[i], d.platform_ids[i]);
+                }
+              } else {
+                addPlatformRow();
+              }
+
+              // Prefill other fields
+              document.getElementById("issued_mobile_number").value = d.issued_mobile_number || "";
+              document.getElementById("issued_device_id").value = d.issued_device_id || "";
+              document.getElementById("mobile_issued").checked = !!d.mobile_issued;
+
+              validateForm();
+              document.getElementById("driverModal").classList.add("show");
+            }
+
+            function closeModal() {
+              document.getElementById("driverModal").classList.remove("show");
+            }
+
+            // Add/Remove platform rows
+            document.getElementById("addPlatformBtn").addEventListener("click", () => addPlatformRow());
+
+            function addPlatformRow(platformName = "", platformId = "") {
+              const container = document.getElementById("platformContainer");
+              const div = document.createElement("div");
+              div.classList.add("platform-row");
+              div.innerHTML = `
+                <select name="platform_name[]" required>
+                  <option value="">-- اختر المنصة --</option>
+                  <option ${platformName === "Jahez" ? "selected" : ""}>جاهز</option>
+                  <option ${platformName === "HungerStation" ? "selected" : ""}>هنجر ستيشن</option>
+                  <option ${platformName === "Keeta" ? "selected" : ""}>كيتا</option>
+                  <option ${platformName === "ToYou" ? "selected" : ""}> تويو</option>
+                  <option ${platformName === "Ninja" ? "selected" : ""}>نينجا</option>
+                </select>
+                <input type="text" name="platform_id[]" placeholder="معرّف مستخدم المنصة" value="${platformId}" required>
+              `;
+              container.appendChild(div);
+
+              
+              div.querySelectorAll("select, input").forEach(el => el.addEventListener("input", validateForm));
+            }
+
+            // Validation
+            document.querySelectorAll("#issued_mobile_number, #issued_device_id, #mobile_issued").forEach(el => {
+              el.addEventListener("input", validateForm);
+            });
+
+            function validateForm() {
+              const container = document.getElementById("platformContainer");
+              const platformValid = Array.from(container.querySelectorAll("select")).every(s => s.value.trim() !== "");
+              const platformIdValid = Array.from(container.querySelectorAll("input[name='platform_id[]']")).every(i => i.value.trim() !== "");
+
+              const approveBtn = document.getElementById("approveBtn");
+              if (platformValid && platformIdValid) {
+                approveBtn.disabled = false;
+                approveBtn.classList.add("enabled");
+              } else {
+                approveBtn.disabled = true;
+                approveBtn.classList.remove("enabled");
+              }
+            }
+
+          </script>
+</div>
+<div id="offboardingTab" style="display:none;">
+<div class="container">
+<!-- Search Box -->
+<div class="search-box" style="margin-bottom: 12px;">
+<input id="offboardingSearch" oninput="filterOffboardingDrivers()" placeholder="ابحث عن السائق بالاسم أو الإقامة..." style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc;" type="text"/>
+</div>
+<div class="driver-cards" id="offboardingRequests" style="display: flex;">
+              {% for record in offboarding_requests %}
+                <div class="driver-card offboarding-card" data-driver-name="{{ record.driver.full_name }}" data-iqama="{{ record.driver.iqama_number }}" data-offboarding-id="{{ record.id }}" data-platforms='[
+                      {% for p in record.driver.platforms %}
+                        {"platform_name": "{{ p.platform_name }}", "platform_user_id": "{{ p.platform_user_id }}"}{% if not loop.last %},{% endif %}
+                      {% endfor %}
+                    ]' data-requested="{{ record.requested_at.strftime('%Y-%m-%d %H:%M') }}" onclick="openOffboardingModal(this)">
+<h3>{{ record.driver.full_name }}</h3>
+<p><strong>إقامة:</strong> {{ record.driver.iqama_number }}</p>
+<p><strong>تم الطلب في:</strong> {{ record.requested_at.strftime('%Y-%m-%d %H:%M') }}</p>
+<p><strong>المنصات:</strong>
+                    {% if record.driver.platforms %}
+                      {% for p in record.driver.platforms %}
+                        {{ p.platform_name }} ({{ p.platform_user_id }}){% if not loop.last %}, {% endif %}
+                      {% endfor %}
+                    {% else %}
+                      N/A
+                    {% endif %}
+                  </p>
+</div>
+              {% else %}
+                <p>لا توجد طلبات خروج في هذه المرحلة.</p>
+              {% endfor %}
+            </div>
+</div>
+<!-- Modal -->
+<div class="modal" id="offboardingModal">
+<div class="modal-content">
+<div class="modal-header">
+<h3 id="modalTitle">إجراءات إنهاء الخدمة</h3>
+<span class="close" onclick="closeOffboardingModal()">×</span>
+</div>
+<form id="offboardingForm">
+<div class="grid">
+<div>
+<p><strong>سائق:</strong> <span id="m_driver_name"></span></p>
+<p><strong>الإقامة:</strong> <span id="m_iqama"></span></p>
+<p><strong>تم الطلب:</strong> <span id="m_requested"></span></p>
+<p><strong>المنصات:</strong> <span id="m_platforms"></span></p>
+</div>
+<div>
+<label><input name="company_mobile_returned" type="checkbox"/> تم إرجاع هاتف الشركة</label><br/>
+<label><input name="company_sim_returned" type="checkbox"/> تم إعادة شريحة الشركة</label><br/>
+<label><input name="platform_returned" type="checkbox"/> تم استرجاع حساب المنصة</label><br/>
+<textarea name="ops_supervisor_note" placeholder="أضف ملاحظات..." style="width:100%;margin-top:6px;"></textarea>
+</div>
+</div>
+<div style="margin-top:12px; display:flex; gap:10px;">
+<button class="btn primary" style="width: 75%;background: #8938a1;color: white;" type="submit">✅ تأكيد &amp; إرسال إلى الأسطول</button>
+<button class="btn secondary" onclick="closeOffboardingModal()" style="background:#f90808;width: 25%;color: white;" type="button">إلغاء</button>
+</div>
+</form>
+</div>
+</div>
+</div>
+<script>
+        let currentOffboardingId = null;
+
+        function openOffboardingModal(card) {
+          currentOffboardingId = card.dataset.offboardingId;
+          document.getElementById("modalTitle").innerText = "Offboarding — " + card.dataset.driverName;
+          document.getElementById("m_driver_name").innerText = card.dataset.driverName;
+          document.getElementById("m_iqama").innerText = card.dataset.iqama;
+          document.getElementById("m_requested").innerText = card.dataset.requested;
+
+          // Parse platforms JSON safely
+          let platforms = [];
+          try { platforms = JSON.parse(card.dataset.platforms); } catch(e) { platforms = []; }
+          const platformText = platforms.map(p => `${p.platform_name} (${p.platform_user_id})`).join(", ") || "N/A";
+          document.getElementById("m_platforms").innerText = platformText;
+
+          document.getElementById("offboardingModal").classList.add("show");
+        }
+
+        function closeOffboardingModal() {
+          document.getElementById("offboardingModal").classList.remove("show");
+          currentOffboardingId = null;
+        }
+
+        document.getElementById("offboardingForm").addEventListener("submit", async function(e) {
+          e.preventDefault();
+          if (!confirm("Confirm clearance and send to Fleet Manager?")) return;
+
+          const formData = new FormData(this);
+          const payload = Object.fromEntries(formData.entries());
+          payload.company_mobile_returned = formData.has("company_mobile_returned");
+          payload.company_sim_returned = formData.has("company_sim_returned");
+          payload.platform_returned = formData.has("platform_returned");
+
+          try {
+            const res = await fetch(`/dashboard/ops_supervisor/api/clear_offboarding/${currentOffboardingId}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+
+            const data = await res.json();
+            if (data.success) {
+              alert("Cleared and sent to Fleet ✅");
+              location.reload();
+            } else {
+              alert(data.message || "Failed to clear offboarding.");
+            }
+          } catch (err) {
+            console.error(err);
+            alert("Server error. Please try again.");
+          }
+        });
+
+        // Close modal when clicking outside
+        window.addEventListener("click", e => {
+          if (e.target.classList.contains("modal")) closeOffboardingModal();
+        });
+        </script>
+<script>
+        function showTab(tab) {
+          document.getElementById("onboardingTab").style.display = tab === "onboarding" ? "block" : "none";
+          document.getElementById("offboardingTab").style.display = tab === "offboarding" ? "block" : "none";
+
+          document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
+          event.target.classList.add("active");
+        }
+        </script>
+</div>
+<div class="col-lg-12" style="width: 20%;">
+<div class="single_element">
+<div class="quick_activity">
+<div class="row">
+<div class="col-12">
+<div class="quick_activity_wrap" style="display: grid;grid-template-columns: repeat(1, 1fr);">
+<div style="display: grid;grid-gap: 10px;grid-template-columns: repeat(1, 1fr);">
+<div class="single_quick_activity" style=" padding: 10px 20px;">
+<h4>السائقون في علامة التبويب الإعداد:</h4>
+<h3> <span class="counter">{{ total_drivers or 0 }}</span> </h3>
+</div>
+<div class="single_quick_activity" style=" padding: 10px 20px;">
+<h4>السائقون في علامة تبويب الإنهاء:</h4>
+<h3><span class="counter">{{ total_users or 0 }}</span> </h3>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="modal" id="passwordModal">
+<div class="modal-content">
+<div class="modal-header">
+<h3>تغيير كلمة المرور</h3>
+<span class="close" onclick="closePasswordModal()">×</span>
+</div>
+<form action="{{ url_for('ops_supervisor.change_password') }}" method="POST">
+<input name="current_password" placeholder="كلمة المرور الحالية" required="" type="password"/>
+<input name="new_password" placeholder="كلمة مرور جديدة" required="" type="password"/>
+<input name="confirm_password" placeholder="تأكيد كلمة المرور" required="" type="password"/>
+<button type="submit">تحديث كلمة المرور</button>
+</form>
+</div>
+</div>
+<script>
+function openPasswordModal() { document.getElementById("passwordModal").classList.add("show"); }
+function closePasswordModal() { document.getElementById("passwordModal").classList.remove("show"); }
+window.addEventListener("click", e => {
+  if(e.target.classList.contains("modal")) closePasswordModal();
+});
+</script>
+</body>
+</html>

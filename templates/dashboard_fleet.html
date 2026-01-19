@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head> 
+  <meta charset="UTF-8">
+  <title>Fleet Manager Dashboard</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='Home_09_Onepage_files/logo1.png') }}">  
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='Finance_files/bootstrap1.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='Finance_files/style1.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='Finance_files/default.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='dashboard-common.css') }}">
+  <style>
+    /* ---------- layout & utility ---------- */
+    :root{
+      --bg:#e8eef5; --nav:#1a1a2e; --accent:#3498db; --ok:#27ae60; --danger:#e74c3c;
+      --primary:#602273; --primary-dark:#450f5c; --text-dark:#2c3e50; --text-light:#555;
+      --card-bg:#ffffff; --border:#cbd5e1; --shadow:0 2px 8px rgba(0,0,0,0.12);
+    }
+    *{box-sizing:border-box}
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); margin: 0; -webkit-font-smoothing:antialiased; }
+    .navbar { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); padding: 15px 20px; color: white; display: flex; justify-content: space-between; align-items: center; box-shadow:var(--shadow); }
+    .navbar a { color: white; margin: 0 10px; text-decoration: none; font-weight: 600; cursor: pointer; background:rgba(255,255,255,0.1); padding:8px 14px; border-radius:6px; transition:all 0.3s; }
+    .navbar a:hover { background:rgba(255,255,255,0.2); }
+    .container { padding: 24px; }
+    .tab-btn { background:#f1f5f9; border:2px solid var(--border); padding:10px 16px; margin-right:8px; border-radius:8px; cursor:pointer; font-weight:600; color:var(--text-light); transition:all 0.3s; }
+    .tab-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+    .tab-btn:hover { background:#e2e8f0; }
+    .driver-card { background: var(--card-bg); width: 280px; padding: 16px; border-radius: 10px; box-shadow: var(--shadow); margin-bottom: 16px; cursor: pointer; transition: transform 0.3s, box-shadow 0.3s; border:1px solid var(--border); }
+    .driver-card:hover { transform: translateY(-2px); background: #f9f9f9; box-shadow:0 4px 16px rgba(0,0,0,0.15); }
+    .driver-card h3 { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-dark); font-weight:600; }
+    .driver-card p { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-light); }
+
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.65); justify-content: center; align-items: center; z-index:9999; }
+    .modal.show { display: flex; }
+    .modal-content { background: var(--card-bg); padding: 24px; border-radius: 12px; width: 520px; max-height: 90vh; overflow-y: auto; box-shadow:0 10px 50px rgba(0,0,0,0.25); }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom:2px solid var(--border); padding-bottom:12px; }
+    .modal-header h2 { margin:0; }
+    .close { cursor: pointer; font-size: 28px; font-weight: bold; color:var(--text-dark); transition:color 0.3s; }
+    .close:hover { color:#e74c3c; }
+
+    label { display: block; margin: 8px 0 6px; font-weight: 600; font-size:14px; color:var(--text-dark); }
+    input, select, textarea { width: 100%; padding: 10px 12px; border: 2px solid var(--border); border-radius: 8px; box-sizing:border-box; font-size:14px; transition:border 0.3s; }
+    input:focus, select:focus, textarea:focus { outline:none; border-color:var(--primary); }
+    input[readonly] { background: #f5f5f5; }
+
+    .approval-info { font-size: 14px; color: var(--text-dark); background: #d4edda; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-weight:600; border:2px solid #28a745; }
+
+    .flash-message { padding: 14px 16px; margin: 10px 0; border-radius: 8px; font-weight: 600; }
+    .flash-success { background: #d4edda; color: #155724; border:2px solid #28a745; }
+    .flash-danger { background: #f8d7da; color: #721c24; border:2px solid #dc3545; }
+
+    .tab-container { display: flex; flex-wrap: wrap; margin: 10px 0; }
+    .tab-button { background: #bdc3c7; border: none; padding: 10px 20px; margin-right: 5px; border-radius: 8px; cursor: pointer; font-weight:600; transition:all 0.3s; }
+    .tab-button.active { background: #27ae60; color: white; box-shadow:0 4px 12px rgba(39,174,96,0.3); }
+    .tab-button:hover { background: #1e8449; color: white; }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-brand">
+      <img src="{{ url_for('static', filename='DOBS.png') }}" alt="DOBS Logo" class="navbar-logo">
+      <span class="navbar-title">Fleet Manager</span>
+    </div>
+    <div class="navbar-menu">
+      <span class="navbar-user">{{ current_user.name or current_user.username }} ({{ current_user.designation }})</span>
+      <button class="btn btn-secondary" onclick="openPasswordModal()">Change Password</button>
+      <a href="{{ url_for('public.set_language', lang='ar') }}" class="lang-switch">العربية</a>
+      <a href="{{ url_for('auth.logout') }}" class="btn btn-danger">Logout</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Drivers Management</h1>
+        <p class="page-subtitle">Manage drivers (pending & completed).</p>
+      </div>
+    </div>
+    <div class="card">
+      <!-- Top Tabs: Onboarding / Offboarding -->
+      <div class="tabs-container">
+        <div class="tab-buttons">
+          <button class="tab-btn active" onclick="showTab('onboarding')">Onboarding</button>
+          <button class="tab-btn" onclick="showTab('offboarding')">Offboarding</button>
+        </div>
+      </div>
+
+    <!-- ================= ONBOARDING TAB ================= -->
+<!-- ================= ONBOARDING TAB ================= -->
+<div id="onboardingTab">
+  <h2>Drivers Waiting for Fleet Assignment</h2>
+
+  {% if onboarding_drivers %}
+    {% for driver in onboarding_drivers %}
+      <div class="driver-card"
+           onclick="openOnboardingModal(this)"
+           data-driver='{{ {
+               "id": driver.id,
+               "name": driver.name or "N/A",
+               "iqama_number": driver.iqaama_number or "N/A",
+               "city": driver.city or "N/A",
+               "iqama_card_upload": driver.iqama_card_upload or "",
+               "absher_number": driver.absher_number or "N/A",
+               "platforms": driver.platforms | map(attribute="platform_name") | list,
+               "platform_ids": driver.platforms | map(attribute="platform_user_id") | list,
+               "ops_manager_approved_at": driver.ops_manager_approved_at.strftime("%Y-%m-%d %H:%M") if driver.ops_manager_approved_at else "",
+               "hr_approved_at": driver.hr_approved_at.strftime("%Y-%m-%d %H:%M") if driver.hr_approved_at else "",
+               "ops_supervisor_approved_at": driver.ops_supervisor_approved_at.strftime("%Y-%m-%d %H:%M") if driver.ops_supervisor_approved_at else ""
+           } | tojson | safe }}'>
+        <h3>{{ driver.name }}</h3>
+        <p><strong>Iqama:</strong> {{ driver.iqaama_number }}</p>
+        <p><strong>Stage:</strong> {{ driver.onboarding_stage }}</p>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p>No drivers pending onboarding.</p>
+  {% endif %}
+</div>
+
+<!-- ================= ONBOARDING MODAL ================= -->
+<div id="driverModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 id="driverName"></h3>
+      <span class="close" onclick="closeModal('driverModal')">&times;</span>
+    </div>
+    <div id="driverDetails"></div>
+
+    <form id="fleetOnboardingForm" method="POST" enctype="multipart/form-data">
+      <label>Vehicle Plate Number</label>
+      <input type="text" name="vehicle_plate" required>
+
+      <label>Vehicle Details</label>
+      <input type="text" name="vehicle_details" required>
+
+      <label>Assignment Date</label>
+      <input type="date" name="assignment_date" required>
+
+      <label>Upload TAMM Authorization Screenshot</label>
+      <input type="file" name="tamm_authorization_ss" accept=".png,.jpg,.jpeg,.pdf" required>
+
+      <label>
+        <input type="checkbox" name="tamm_authorized" value="1" required>
+        ✅ TAMM Authorization Issued
+      </label>
+
+      <button type="submit"
+              style="border-radius:10px;background:#602273;color:#fff;padding:10px;">
+        ✅ Assign Vehicle & Send to Next Stage
+      </button>
+    </form>
+  </div>
+</div>
+
+<script>
+/* ========= OPEN MODAL ========= */
+function openOnboardingModal(card) {
+  try {
+    const d = JSON.parse(card.dataset.driver);
+    if (!d) return;
+
+    const nameEl = document.getElementById("driverName");
+    const detailsEl = document.getElementById("driverDetails");
+    const form = document.getElementById("fleetOnboardingForm");
+    if (!nameEl || !detailsEl || !form) return;
+
+    // Title
+    nameEl.innerText = "Assign Vehicle for: " + (d.name || "N/A");
+
+    // Build driver info
+    let html = `
+      <div class="approval-info"><strong>Ops Manager Approved:</strong> ${d.ops_manager_approved_at || "❌ Not Approved"}</div>
+      <div class="approval-info"><strong>HR Approved:</strong> ${d.hr_approved_at || "❌ Not Approved"}</div>
+      <div class="approval-info"><strong>Ops Supervisor Approved:</strong> ${d.ops_supervisor_approved_at || "❌ Not Approved"}</div>
+      <p><strong>Iqama:</strong> ${d.iqama_number || "N/A"}</p>
+      <p><strong>City:</strong> ${d.city || "N/A"}</p>
+      <p><strong>Absher Number:</strong> ${d.absher_number || "N/A"}</p>
+    `;
+
+    if (d.platforms && d.platforms.length) {
+      html += `<p><strong>Platforms:</strong> ${d.platforms.map((p, i) =>
+        `${p} (${d.platform_ids[i] || 'N/A'})`).join(", ")}</p>`;
+    }
+
+    // Iqama card display
+    if (d.iqama_card_upload) {
+      let imgPath = d.iqama_card_upload.replace(/^\/?static\/uploads\//, "");
+      html += `<p><img src="/static/uploads/${imgPath}" width="300" style="border-radius:8px;" alt="Iqama Card"></p>`;
+    } else {
+      html += `<p><em>Iqama card not uploaded</em></p>`;
+    }
+
+    detailsEl.innerHTML = html;
+    form.action = `/dashboard/fleet/assign_vehicle/${d.id}`;
+
+    openModal("driverModal");
+  } catch (err) {
+    console.error("Failed to open onboarding modal:", err);
+  }
+}
+
+/* ========= SUBMIT FORM (AJAX) ========= */
+document.addEventListener("DOMContentLoaded", () => {
+  const form = document.getElementById("fleetOnboardingForm");
+  if (!form) return;
+
+  form.addEventListener("submit", async function (e) {
+    e.preventDefault();
+
+    if (!confirm("Are you sure you want to assign this vehicle?")) return;
+
+    const formData = new FormData(this);
+
+    try {
+      const res = await fetch(this.action, { method: "POST", body: formData });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) throw new Error(data.message || "Vehicle assignment failed");
+
+      alert("✅ " + (data.message || "Vehicle assigned successfully!"));
+      closeModal("driverModal");
+      location.reload();
+
+    } catch (err) {
+      console.error("Onboarding form error:", err);
+      alert("⚠️ " + err.message);
+    }
+  });
+});
+</script>
+
+
+    <!-- ================= OFFBOARDING TAB ================= -->
+    <div id="offboardingTab" style="display:none;">
+      <h2>Driver Offboarding Requests</h2>
+      <div style="display: ruby;">
+      {% for record in offboarding_requests %}
+        <div class="driver-card"
+          data-offboarding-id="{{ record.id }}"
+          data-driver-name="{{ record.driver.name }}"
+          data-iqama="{{ record.driver.iqaama_number }}"
+          data-requested="{{ record.requested_at.strftime('%Y-%m-%d %H:%M') }}"
+          onclick="openOffboardingModal(this)">
+          <h3>{{ record.driver.name }}</h3>
+          <p><strong>Iqama:</strong> {{ record.driver.iqaama_number }}</p>
+          <p><strong>Requested At:</strong> {{ record.requested_at.strftime('%Y-%m-%d %H:%M') }}</p>
+          <p><strong>Status:</strong> {{ record.status }}</p>
+        </div>
+      {% else %}
+        <p>No pending offboarding requests.</p>
+      {% endfor %}
+      </div>
+    </div>
+
+    <!-- ================= OFFBOARDING MODAL ================= -->
+    <div id="offboardingModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Driver Offboarding: <span id="offboardingModalDriver"></span></h3>
+          <span class="close" onclick="closeModal('offboardingModal')">&times;</span>
+        </div>
+
+        <form id="offboardingForm">
+          <input type="hidden" id="offboardingId">
+
+          <label><input type="checkbox" id="carReturned" required> Car Returned</label>
+          <label>Damage Assessment:</label>
+          <textarea id="damageReport" required></textarea>
+          <label>Damage Cost (SAR):</label>
+          <input type="number" id="damageCost" step="0.01" required>
+
+          <hr>
+          <label><input type="checkbox" id="tammRevoked" required> ⚠️ TAMM Revoked / Fully Offboarded</label>
+
+          <div style="margin-top:15px;">
+            <button style="border-radius:10px;background:#602273;color:#fff;padding:10px;margin-bottom: 5px;" type="submit">✅ Submit Offboarding</button>
+            <button type="button" style="border-radius:10px;background:#7c2828;color:#fff;padding:10px;" onclick="closeModal('offboardingModal')">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ================= PASSWORD MODAL ================= -->
+    <div id="passwordModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Change Password</h3>
+          <span class="close" onclick="closeModal('passwordModal')">&times;</span>
+        </div>
+        <form method="POST" action="{{ url_for('fleet.change_password') }}">
+          <input type="password" name="current_password" placeholder="Current Password" required>
+          <input type="password" name="new_password" placeholder="New Password" required>
+          <input type="password" name="confirm_password" placeholder="Confirm Password" required>
+          <button type="submit">Update Password</button>
+        </form>
+      </div>
+    </div>
+  </div>
+          <div class="col-lg-12" style="width: 20%;">
+            <div class="single_element">
+                <div class="quick_activity">
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="quick_activity_wrap" style="display: grid;grid-template-columns: repeat(1, 1fr);">
+                                <div style="display: grid;grid-gap: 10px;grid-template-columns: repeat(1, 1fr);">
+                                  <div class="single_quick_activity" style=" padding: 10px 20px;">
+                                      <h4>drivers in OnboardingTab:</h4>
+                                      <h3> <span class="counter">{{ total_drivers or 0 }}</span> </h3>
+                                  </div>
+                                  <div class="single_quick_activity" style=" padding: 10px 20px;">
+                                      <h4>drivers in OffboardingTab:</h4>
+                                      <h3> <span class="counter">{{ total_users or 0 }}</span> </h3>
+                                  </div>
+                                </div>  
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+      </div>
+      </div>
+    </div>
+  <!-- ================= JAVASCRIPT ================= -->
+<!-- ================= CLEAN JAVASCRIPT ================= -->
+<script>
+/* ========= Helper: Modal Control ========= */
+function openModal(id) {
+  const modal = document.getElementById(id);
+  if (modal) modal.classList.add("show");
+}
+function closeModal(id) {
+  const modal = document.getElementById(id);
+  if (modal) modal.classList.remove("show");
+}
+
+/* ========= Tab Switcher (Main: Onboarding/Offboarding) ========= */
+function showTab(tabName, btn) {
+  const onboardingTab = document.getElementById("onboardingTab");
+  const offboardingTab = document.getElementById("offboardingTab");
+
+  onboardingTab.style.display = tabName === "onboarding" ? "block" : "none";
+  offboardingTab.style.display = tabName === "offboarding" ? "block" : "none";
+
+  document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+}
+
+
+/* ========= Offboarding Logic ========= */
+let currentOffboardingId = null;
+
+function openOffboardingModal(card) {
+  currentOffboardingId = card.dataset.offboardingId;
+  document.getElementById("offboardingModalDriver").innerText = card.dataset.driverName;
+  openModal("offboardingModal");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const form = document.getElementById("offboardingForm");
+  if (!form) return;
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!currentOffboardingId) {
+      alert("Missing offboarding record ID.");
+      return;
+    }
+
+    const payload = {
+      fleet_damage_report: document.getElementById("damageReport").value,
+      fleet_damage_cost: document.getElementById("damageCost").value,
+      tamm_revoked: document.getElementById("tammRevoked").checked,
+      finalize: false,
+      finance_cleared: false
+    };
+
+    if (!confirm("Are you sure you want to send this driver for offboarding?")) return;
+
+    try {
+      const res = await fetch(`/dashboard/fleet/api/offboarding_action/${currentOffboardingId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.message || "Offboarding failed.");
+      }
+
+      alert(data.message);
+      location.reload();
+    } catch (err) {
+      console.error("Offboarding error:", err);
+      alert("⚠️ An unexpected error occurred: " + err.message);
+    }
+  });
+});
+
+/* ========= Password Modal ========= */
+function openPasswordModal() {
+  openModal("passwordModal");
+}
+</script>
+
+
+</body>
+</html>
