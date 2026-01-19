@@ -183,13 +183,21 @@ def export_csv():
     
     # Rows
     for d in drivers:
+        name = getattr(d, "name", "") or ""
+        iqama_number = getattr(d, "iqaama_number", "") or ""
+        city = getattr(d, "city", "") or ""
+        assignment_date = getattr(d, "assignment_date", None)
+        assignment_date_str = assignment_date.strftime("%Y-%m-%d") if assignment_date else ""
+        transfer_status = getattr(d, "sponsorship_transfer_status", "Pending") or "Pending"
+        stage = getattr(d, "onboarding_stage", "") or ""
+
         writer.writerow([
-            d.full_name,
-            d.iqama_number,
-            d.city or "",
-            d.assignment_date.strftime("%Y-%m-%d") if d.assignment_date else "",
-            d.sponsorship_transfer_status or "Pending",
-            d.onboarding_stage or ""
+            name,
+            iqama_number,
+            city,
+            assignment_date_str,
+            transfer_status,
+            stage
         ])
 
     # Move to start
