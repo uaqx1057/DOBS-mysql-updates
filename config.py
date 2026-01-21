@@ -6,7 +6,6 @@ class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "your_secret_key")
     SQLALCHEMY_DATABASE_URI = os.getenv(
         "DATABASE_URI", "mysql+pymysql://dobsykjq_dms:9gj*X]MwPPy+@localhost:3306/dobsykjq_dms"
-
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
@@ -33,11 +32,15 @@ class Config:
     MAIL_DEFAULT_SENDER = ("DOBS System", "system@dobs.dobs.cloud")
 
     # Connection pool settings
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        "pool_size": 10,         # number of persistent connections
-        "max_overflow": 20,      # number of temporary overflow connections
-        "pool_timeout": 30,      # seconds to wait for a free connection
-        "pool_recycle": 1800,    # recycle connections after 30 minutes
-        "pool_pre_ping": True    # check if connections are alive before using
-    }
+    # Apply pool options only for non-SQLite engines to avoid sqlite errors during migrations
+    if not SQLALCHEMY_DATABASE_URI.startswith("sqlite"):
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            "pool_size": 10,
+            "max_overflow": 20,
+            "pool_timeout": 30,
+            "pool_recycle": 1800,
+            "pool_pre_ping": True
+        }
+    else:
+        SQLALCHEMY_ENGINE_OPTIONS = {}
 

@@ -5,7 +5,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, send_from_directory, session, redirect, url_for, request, make_response
 from config import Config
-from extensions import db, mail, login_manager
+from extensions import db, mail, login_manager, migrate
+# Ensure models are registered with SQLAlchemy metadata for migrations
+import models  # noqa: F401
 
 # Import blueprints
 from blueprints.public.routes import public_bp
@@ -38,6 +40,7 @@ def create_app():
     db.init_app(app)
     mail.init_app(app)
     login_manager.init_app(app)
+    migrate.init_app(app, db)
 
     # --- Register blueprints ---
     app.register_blueprint(public_bp)
@@ -73,12 +76,13 @@ def create_app():
         next_page = request.args.get("next") or url_for("front_page")
         return redirect(next_page)
 
-    # --- Database creation ---
-    with app.app_context():
-        try:
-            db.create_all()
-        except Exception as e:
-            print("Database initialization failed:", e)
+    # --- Database creation (skip during migrations if requested) ---
+    if os.getenv("SKIP_CREATE_DB") != "1":
+        with app.app_context():
+            try:
+                db.create_all()
+            except Exception as e:
+                print("Database initialization failed:", e)
 
     return app
 

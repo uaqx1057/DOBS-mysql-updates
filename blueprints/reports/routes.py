@@ -174,6 +174,17 @@ def export_csv():
         request.args.get("transfer_status")
     )
 
+    def safe_get(obj, *names, default=""):
+        """Return first existing attr from names without raising AttributeError."""
+        for name in names:
+            try:
+                val = getattr(obj, name)
+            except AttributeError:
+                continue
+            if val is not None:
+                return val
+        return default
+
     # Use StringIO for text CSV (not BytesIO)
     output = StringIO()
     writer = csv.writer(output)
@@ -181,15 +192,15 @@ def export_csv():
     # Header
     writer.writerow(["Full Name", "Iqama Number", "City", "Assignment Date", "Transfer Done", "Stage"])
     
-    # Rows
+    # Rows (defensive attribute access for mismatched column names)
     for d in drivers:
-        name = getattr(d, "name", "") or ""
-        iqama_number = getattr(d, "iqaama_number", "") or ""
-        city = getattr(d, "city", "") or ""
-        assignment_date = getattr(d, "assignment_date", None)
+        name = safe_get(d, "name", "full_name") or ""
+        iqama_number = safe_get(d, "iqama_number", "iqaama_number") or ""
+        city = safe_get(d, "city") or ""
+        assignment_date = safe_get(d, "assignment_date")
         assignment_date_str = assignment_date.strftime("%Y-%m-%d") if assignment_date else ""
-        transfer_status = getattr(d, "sponsorship_transfer_status", "Pending") or "Pending"
-        stage = getattr(d, "onboarding_stage", "") or ""
+        transfer_status = safe_get(d, "sponsorship_transfer_status", default="Pending") or "Pending"
+        stage = safe_get(d, "onboarding_stage") or ""
 
         writer.writerow([
             name,
@@ -229,6 +240,17 @@ def export_pdf():
         request.args.get("transfer_status")
     )
 
+    def safe_get(obj, *names, default=""):
+        """Return first existing attr from names without raising AttributeError."""
+        for name in names:
+            try:
+                val = getattr(obj, name)
+            except AttributeError:
+                continue
+            if val is not None:
+                return val
+        return default
+
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
@@ -241,15 +263,15 @@ def export_pdf():
     # Table header
     data = [["Full Name", "Iqama Number", "City", "Assignment Date", "Transfer Done", "Stage"]]
 
-    # Table rows
+    # Table rows (defensive attribute access)
     for d in drivers:
-        full_name = getattr(d, "full_name", "N/A") or "N/A"
-        iqama_number = getattr(d, "iqama_number", "N/A") or "N/A"
-        city = getattr(d, "city", "") or ""
-        assignment_date = getattr(d, "assignment_date", None)
+        full_name = safe_get(d, "name", "full_name", default="N/A") or "N/A"
+        iqama_number = safe_get(d, "iqama_number", "iqaama_number", default="N/A") or "N/A"
+        city = safe_get(d, "city") or ""
+        assignment_date = safe_get(d, "assignment_date")
         assignment_date_str = assignment_date.strftime("%Y-%m-%d") if assignment_date else ""
-        transfer_status = getattr(d, "sponsorship_transfer_status", "Pending") or "Pending"
-        stage = getattr(d, "onboarding_stage", "") or ""
+        transfer_status = safe_get(d, "sponsorship_transfer_status", default="Pending") or "Pending"
+        stage = safe_get(d, "onboarding_stage") or ""
 
         data.append([full_name, iqama_number, city, assignment_date_str, transfer_status, stage])
 
