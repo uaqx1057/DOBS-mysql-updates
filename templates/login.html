@@ -1,4 +1,4 @@
-<html lang="en-US" class="no-js no-svg"><head>
+<html lang="{{ current_lang or 'en' }}" dir="{{ text_direction or 'ltr' }}" class="no-js no-svg"><head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>DOBS</title>
@@ -390,15 +390,17 @@ var woocommerce_params = {"ajax_url":"\/wp\/fastrans\/fastrans\/wp-admin\/admin-
             <div class="container">
                 <div class="tl-thx-banner-text text-center position-relative headline pera-content">
                         <div class="login-container" style="max-width: 500px;margin: 0 auto;">
-      <h1>Login</h1>
+      <h1>{{ 'Login' if current_lang == 'en' else 'تسجيل الدخول' }}</h1>
       <form method="POST">
-        <label for="username">Username:</label>
-        <input type="text" name="username" id="username" required="">
+        {{ form.hidden_tag() }}
 
-        <label for="password">Password:</label>
-        <input type="password" name="password" id="password" required="">
+        <label for="username">{{ 'Username:' if current_lang == 'en' else 'اسم المستخدم:' }}</label>
+        {{ form.username(class_="form-control", id="username", required=True) }}
 
-        <button type="submit">Login</button>
+        <label for="password">{{ 'Password:' if current_lang == 'en' else 'كلمة المرور:' }}</label>
+        {{ form.password(class_="form-control", id="password", required=True) }}
+
+        {{ form.submit(class_="btn btn-primary w-100", value=('Login' if current_lang == 'en' else 'تسجيل الدخول')) }}
       </form>
       {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}

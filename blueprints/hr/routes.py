@@ -2,12 +2,14 @@
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 from models import Driver, User, Offboarding
-from extensions import db, mail
+from extensions import db, mail, csrf
+from services.hr_service import process_hr_approval, save_transfer_proof, send_rejection_email
 from flask_mail import Message
 from datetime import datetime
 import os
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
+from services.hr_service import process_hr_approval, save_transfer_proof, send_rejection_email
 
 hr_bp = Blueprint("hr", __name__, url_prefix='/hr')
 
@@ -165,43 +167,24 @@ def approve_driver(driver_id):
 
     driver = Driver.query.get_or_404(driver_id)
 
-    # Mapping: DB field → form file input name
-    file_fields = {
-        "company_contract_file": "company_contract",
-        "promissory_note_file": "promissory_note",
-        "qiwa_contract_file": "qiwa_contract",
+    files = {
+        "company_contract_file": request.files.get("company_contract"),
+        "promissory_note_file": request.files.get("promissory_note"),
+        "qiwa_contract_file": request.files.get("qiwa_contract"),
     }
 
-    for db_field, form_name in file_fields.items():
-        uploaded_file = request.files.get(form_name)
-        if uploaded_file and uploaded_file.filename:
-            # Check allowed extension
-            _, ext = os.path.splitext(uploaded_file.filename)
-            if ext.lower() not in ALLOWED_EXT:
-                flash(f"Invalid file type for {db_field}. Only JPG, PNG, PDF allowed.", "danger")
-                return redirect(url_for("hr.dashboard_hr"))
-
-            # Safe filename
-            safe_name = f"{driver.name.replace(' ', '_')}_{driver.iqaama_number}_{db_field}{ext.lower()}"
-            dest = os.path.join(UPLOAD_FOLDER, safe_name)
-            uploaded_file.save(dest)
-
-            # ✅ Save filename to DB column
-            setattr(driver, db_field, safe_name)
-
-    # Save Qiwa / company contract statuses
-    driver.qiwa_contract_created = bool(request.form.get("qiwa_contract_created"))
-    driver.company_contract_created = bool(request.form.get("company_contract_created"))
-    driver.qiwa_contract_status = request.form.get("qiwa_contract_status", "Pending")
-    driver.sponsorship_transfer_status = request.form.get("sponsorship_transfer_status", "Pending")
-
-    # Mark HR approval & move to next stage
-    _ensure_driver_password(driver)
-    driver.hr_approved_at = datetime.utcnow()
-    driver.onboarding_stage = "Ops Supervisor"
-
-    # Commit everything
-    db.session.commit()
+    try:
+        process_hr_approval(driver, files, request.form, UPLOAD_FOLDER)
+        _ensure_driver_password(driver)
+        db.session.commit()
+    except ValueError as ve:
+        db.session.rollback()
+        flash(str(ve), "danger")
+        return redirect(url_for("hr.dashboard_hr"))
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error approving driver: {e}", "danger")
+        return redirect(url_for("hr.dashboard_hr"))
 
     # Notify Ops Supervisors
     try:
@@ -290,57 +273,15 @@ def reject_driver(driver_id):
         for group in (ops_managers, hr_users, admins):
             recipients.extend([u.email for u in group if u.email])
 
-        # Send email notification
-        if recipients:
-            msg = Message(
-                subject=f"Driver Rejected by HR | تم رفض السائق: {driver_name}",
-                recipients=recipients
-            )
-
-            msg.html = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; color: #333; background-color: #f8f9fa; padding: 20px;">
-                <div style="max-width: 600px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.1);">
-
-                    <!-- English Section -->
-                    <div style="text-align: left;">
-                        <h2 style="color: #713183;">Driver Rejection Notification</h2>
-                        <p>Hello Team,</p>
-                        <p>Driver <strong>{driver_name}</strong> (iqaama: <strong>{iqaama_number or "N/A"}</strong>, Nationality: <strong>{nationality}</strong>) has been <strong>REJECTED</strong> by the HR department and permanently removed from the system.</p>
-                        <p><strong>Reason for rejection:</strong><br>{reason}</p>
-                        <p>Rejected by: {current_user.name}<br>
-                        Date: {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")} UTC</p>
-                        <p>Please review this information and take note of the rejection decision.</p>
-                        <p>Login to your dashboard: <a href="https://dobs.dobs.cloud/login" target="_blank">https://dobs.dobs.cloud/login</a></p>
-                    </div>
-
-                    <hr style="margin: 30px 0;">
-
-                    <!-- Arabic Section -->
-                    <div dir="rtl" lang="ar" style="text-align: right; font-family: Tahoma, sans-serif;">
-                        <h2 style="color: #713183;">إشعار رفض السائق</h2>
-                        <p>السادة فريق الإدارة والعمليات والموارد البشرية،</p>
-                        <p>تم رفض السائق <strong>{driver_name}</strong> (رقم الإقامة: <strong>{iqaama_number or "N/A"}</strong>، الجنسية: <strong>{nationality}</strong>) من قبل قسم الموارد البشرية وتم حذفه نهائيًا من النظام.</p>
-                        <p><strong>سبب الرفض:</strong><br>{reason}</p>
-                        <p>تم الرفض بواسطة: {current_user.name}<br>
-                        التاريخ: {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")} UTC</p>
-                        <p>يرجى مراجعة هذه المعلومات وأخذ العلم بقرار الرفض.</p>
-                        <p>تسجيل الدخول إلى لوحة القيادة: <a href="https://dobs.dobs.cloud/login" target="_blank">https://dobs.dobs.cloud/login</a></p>
-                    </div>
-
-                    <hr style="margin: 30px 0;">
-
-                    <p style="text-align:center;">Regards / مع التحية,<br>HR Department / قسم الموارد البشرية</p>
-
-                </div>
-            </body>
-            </html>
-            """
-
-            mail.send(msg)
-
-
-
+        send_rejection_email(
+            mail,
+            recipients,
+            driver_name,
+            iqaama_number,
+            nationality,
+            reason,
+            current_user.name,
+        )
 
         flash(f"Driver {driver_name} rejected and deleted. Notifications sent.", "success")
 
@@ -378,33 +319,22 @@ def complete_sponsorship_transfer(driver_id):
             flash(f"✅ Driver {driver.name} marked as completed (no Qiwa contract).", "success")
 
         else:
-            # 🔹 Case 2: Driver HAS a Qiwa contract — must upload proof + status
             transfer_status = request.form.get("sponsorship_transfer_status")
             file = request.files.get("sponsorship_transfer_proof")
-
-            if transfer_status != "Transferred" or not file or not file.filename:
-                flash("⚠️ Please select 'Transferred' and upload proof before marking complete.", "warning")
+            try:
+                save_transfer_proof(driver, file, UPLOAD_FOLDER, transfer_status)
+                driver.onboarding_stage = "Completed"
+                _ensure_driver_code(driver)
+                db.session.commit()
+                flash(f"✅ Sponsorship transfer completed for {driver.name}.", "success")
+            except ValueError as ve:
+                db.session.rollback()
+                flash(str(ve), "warning")
                 return redirect(url_for("hr.dashboard_hr"))
-
-            if not _allowed_filename(file.filename):
-                flash("Invalid file type. Only JPG, PNG, and PDF are allowed.", "danger")
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Error completing transfer: {e}", "danger")
                 return redirect(url_for("hr.dashboard_hr"))
-
-            ext = os.path.splitext(file.filename)[1].lower()
-            driver_name = driver.name.replace(" ", "_") if driver.name else "driver"
-            iqaama = driver.iqaama_number or "unknown"
-            filename = f"{driver_name}_{iqaama}_transfer_proof{ext}"
-            dest = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(dest)
-
-            driver.sponsorship_transfer_status = transfer_status
-            driver.sponsorship_transfer_proof = filename
-            driver.sponsorship_transfer_completed_at = datetime.utcnow()
-            driver.onboarding_stage = "Completed"
-            _ensure_driver_code(driver)
-            db.session.commit()
-
-            flash(f"✅ Sponsorship transfer completed for {driver.name}.", "success")
 
         # 📧 Notify SuperAdmins after completion
         superadmins = User.query.filter_by(role="SuperAdmin").all()

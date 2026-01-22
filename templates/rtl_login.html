@@ -395,13 +395,15 @@ var woocommerce_params = {"ajax_url":"\/wp\/fastrans\/fastrans\/wp-admin\/admin-
                         <div class="login-container" style="max-width: 500px;margin: 0 auto;">
       <h1>تسجيل الدخول</h1>
       <form method="POST">
+        {{ form.hidden_tag() }}
+
         <label for="username">اسم المستخدم:</label>
-        <input type="text" name="username" id="username" required="">
+        {{ form.username(class_="form-control", id="username", required=True) }}
 
         <label for="password">كلمة المرور:</label>
-        <input type="password" name="password" id="password" required="">
+        {{ form.password(class_="form-control", id="password", required=True) }}
 
-        <button type="submit">تسجيل الدخول</button>
+        {{ form.submit(class_="btn btn-primary w-100") }}
       </form>
       {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}

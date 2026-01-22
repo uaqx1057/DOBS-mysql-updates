@@ -3,9 +3,9 @@ import os
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from flask import Flask, send_from_directory, session, redirect, url_for, request, make_response
+from flask import Flask, send_from_directory, session, redirect, url_for, request, make_response, g
 from config import Config
-from extensions import db, mail, login_manager, migrate
+from extensions import db, mail, login_manager, migrate, csrf, babel
 # Ensure models are registered with SQLAlchemy metadata for migrations
 import models  # noqa: F401
 
@@ -41,6 +41,25 @@ def create_app():
     mail.init_app(app)
     login_manager.init_app(app)
     migrate.init_app(app, db)
+    csrf.init_app(app)
+
+    # --- Localization (Babel) ---
+    def select_locale():
+        return session.get("lang") or request.accept_languages.best_match(app.config["LANGUAGES"]) or "en"
+
+    babel.init_app(app, locale_selector=select_locale)
+
+    # --- Basic logging setup ---
+    if not app.debug:
+        import logging
+        from logging.handlers import RotatingFileHandler
+
+        log_path = os.path.join(base_dir, "logs")
+        os.makedirs(log_path, exist_ok=True)
+        handler = RotatingFileHandler(os.path.join(log_path, "app.log"), maxBytes=1_000_000, backupCount=5)
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        app.logger.addHandler(handler)
 
     # --- Register blueprints ---
     app.register_blueprint(public_bp)
@@ -60,6 +79,15 @@ def create_app():
         if "lang" not in session:
             preferred = request.accept_languages.best_match(["en", "ar"])
             session["lang"] = preferred or "en"
+        g.current_lang = session.get("lang", "en")
+        g.text_direction = "rtl" if g.current_lang == "ar" else "ltr"
+
+    @app.context_processor
+    def inject_lang():
+        return {
+            "current_lang": getattr(g, "current_lang", "en"),
+            "text_direction": getattr(g, "text_direction", "ltr"),
+        }
 
     # --- Front page route ---
     @app.route("/")
@@ -68,6 +96,11 @@ def create_app():
         filename = "rtl_index.html" if lang == "ar" else "index.html"
         return make_response(send_from_directory(base_dir, filename))
 
+    # --- Health endpoint for ops ---
+    @app.route("/healthz")
+    def healthz():
+        return {"status": "ok"}, 200
+
     # --- Set language route ---
     @app.route("/set_language/<lang>")
     def set_language(lang):
@@ -75,14 +108,6 @@ def create_app():
             session["lang"] = lang
         next_page = request.args.get("next") or url_for("front_page")
         return redirect(next_page)
-
-    # --- Database creation (skip during migrations if requested) ---
-    if os.getenv("SKIP_CREATE_DB") != "1":
-        with app.app_context():
-            try:
-                db.create_all()
-            except Exception as e:
-                print("Database initialization failed:", e)
 
     return app
 
