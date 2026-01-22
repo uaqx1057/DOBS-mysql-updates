@@ -364,6 +364,7 @@
     <div class="filter-section">
       <h6 class="filter-title"><i class="fas fa-filter"></i> Report Filters</h6>
       <form method="POST" class="row g-3">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="col-md-2">
         <label class="form-label">Report Type</label>
         <select class="form-select" name="report_type">
