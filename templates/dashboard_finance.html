@@ -231,6 +231,7 @@
 
             <!-- Finance Form -->
             <form id="financeForm" method="POST" enctype="multipart/form-data" style="margin-top:15px;" required>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <h4>Finance — Transfer Fee / Payment</h4>
               <label><input type="checkbox" id="transfer_fee_paid" name="transfer_fee_paid" required> Transfer / Transfer Fee Paid</label>
               <label>Amount</label>
@@ -254,6 +255,7 @@
               <span class="close" onclick="closePasswordModal()">&times;</span>
             </div>
             <form method="POST" action="{{ url_for('finance.change_password') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <label>Current Password</label>
               <input type="password" name="current_password" required>
               <label>New Password</label>
@@ -309,6 +311,7 @@
                 </div>
 
                 <form id="financeOffboardingForm" method="POST" enctype="multipart/form-data">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <label>Finance Adjustments (SAR)</label>
                   <input type="number" name="finance_adjustments" required>
                   <label>Finance Notes</label>
@@ -482,6 +485,7 @@
 
 
 
+{% include 'includes/csrf_auto.html' %}
 </body>
 </html>
  

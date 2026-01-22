@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app, session
 from flask_login import login_required, current_user
 from extensions import db, mail
+from extensions import db, mail, limiter
 from flask_mail import Message
 from datetime import datetime, date
 from werkzeug.utils import secure_filename
@@ -9,8 +10,25 @@ from sqlalchemy.orm import joinedload
 from models import Offboarding, Driver, User
 from utils.email_utils import send_password_change_email
 import os
+from flask_wtf.csrf import validate_csrf, CSRFError
+from forms.common import CSRFOnlyForm, ChangePasswordForm, FleetAssignForm, FleetOffboardingForm
 
 fleet_bp = Blueprint("fleet", __name__)
+
+
+def _validate_csrf():
+    """Validate CSRF token from form or X-CSRFToken header."""
+    header_token = request.headers.get("X-CSRFToken")
+    if header_token:
+        try:
+            validate_csrf(header_token)
+            return True
+        except CSRFError as exc:
+            current_app.logger.warning("[FLEET] Header CSRF failed: %s", exc)
+            return False
+
+    form = CSRFOnlyForm()
+    return form.validate_on_submit()
 
 # -------------------------
 # Fleet Manager Dashboard
@@ -79,12 +97,16 @@ def assign_vehicle(driver_id):
     if current_user.role != "FleetManager":
         return jsonify({"success": False, "message": "Access denied. Fleet Manager role required."}), 403
 
+    form = FleetAssignForm()
+    if not form.validate_on_submit():
+        return jsonify({"success": False, "message": "Invalid CSRF token."}), 400
+
     driver = Driver.query.get_or_404(driver_id)
 
     # Gather form data
-    vehicle_plate = request.form.get("vehicle_plate", "").strip()
-    vehicle_details = request.form.get("vehicle_details", "").strip()
-    assignment_date = request.form.get("assignment_date", "").strip()
+    vehicle_plate = (form.vehicle_plate.data or "").strip()
+    vehicle_details = (form.vehicle_details.data or "").strip()
+    assignment_date = form.assignment_date.data.strftime("%Y-%m-%d") if form.assignment_date.data else ""
     tamm_authorized = request.form.get("tamm_authorized")
     tamm_file = request.files.get("tamm_authorization_ss")
 
@@ -233,10 +255,14 @@ def assign_vehicle(driver_id):
 # Fleet Manager Offboarding / TAMM Revocation (Unified)
 # -------------------------
 @fleet_bp.route("/api/offboarding_action/<int:offboarding_id>", methods=["POST"])
+@limiter.limit("30 per minute")
 @login_required
 def offboarding_action(offboarding_id):
     if current_user.role != "FleetManager":
         return jsonify({"success": False, "message": "Access denied"}), 403
+
+    if not _validate_csrf():
+        return jsonify({"success": False, "message": "Invalid CSRF token."}), 400
 
     record = Offboarding.query.get_or_404(offboarding_id)
     data = request.get_json()
@@ -426,21 +452,22 @@ def offboarding_action(offboarding_id):
 # Change Password
 # -------------------------
 @fleet_bp.route("/change_password", methods=["POST"])
+@limiter.limit("5 per minute")
 @login_required
 def change_password():
     if current_user.role != "FleetManager":
         flash("Access denied. Fleet Manager role required.", "danger")
         return redirect(url_for("auth.login"))
 
-    current_password = request.form.get("current_password", "")
-    new_password = request.form.get("new_password", "")
-    confirm_password = request.form.get("confirm_password", "")
-
-    if not current_password or not new_password or not confirm_password:
-        flash("Please fill all password fields.", "danger")
+    form = ChangePasswordForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
         return redirect(url_for("fleet.dashboard_fleet"))
 
-    if not check_password_hash(current_user.password, current_password):
+    new_password = form.new_password.data
+    confirm_password = form.confirm_password.data
+
+    if not check_password_hash(current_user.password, form.current_password.data):
         flash("Current password is incorrect.", "danger")
         return redirect(url_for("fleet.dashboard_fleet"))
 

@@ -117,9 +117,15 @@
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div id="flash-messages" style="position: fixed; top: 80px; right: 20px; z-index: 11000;">
+          <style>
+            #flash-messages .flash { color: white; padding: 10px 16px; margin-bottom:8px; border-radius:6px; box-shadow:0 2px 6px rgba(0,0,0,0.12); min-width:220px; }
+            #flash-messages .flash.success { background:#4CAF50; }
+            #flash-messages .flash.danger, #flash-messages .flash.error { background:#f44336; }
+            #flash-messages .flash.warning { background:#ff9800; }
+            #flash-messages .flash.info { background:#2196F3; }
+          </style>
           {% for category, message in messages %}
-            {% set bg = '#4CAF50' if category == 'success' else '#f44336' if category in ['danger','error'] else '#ff9800' if category == 'warning' else '#2196F3' %}
-            <div style="background: {{ bg }}; color: white; padding: 10px 16px; margin-bottom:8px; border-radius:6px; box-shadow:0 2px 6px rgba(0,0,0,0.12); min-width:220px;">
+            <div class="flash {{ category }}">
               {{ message }}
             </div>
           {% endfor %}
@@ -209,8 +215,12 @@
 
 
 
+<script id="allBusinessesData" type="application/json">
+  {{ all_businesses | tojson | safe }}
+</script>
+
 <script>
-const allBusinesses = {{ all_businesses | tojson | safe }};
+const allBusinesses = JSON.parse(document.getElementById('allBusinessesData')?.textContent || '[]');
 
 function addBusinessRow(selectedBusinessId = '', selectedId = '') {
   const container = document.getElementById('businessContainer');
@@ -560,5 +570,6 @@ document.getElementById('addBusinessBtn').addEventListener('click', () => addBus
     function openPasswordModal(){ document.getElementById('passwordModal').classList.add('show'); }
     function closePasswordModal(){ document.getElementById('passwordModal').classList.remove('show'); }
   </script>
+{% include 'includes/csrf_auto.html' %}
 </body>
 </html>

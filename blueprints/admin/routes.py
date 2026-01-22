@@ -1,13 +1,23 @@
 from flask import Blueprint, Flask, render_template, request, redirect, url_for, flash, session , current_app
 from flask_login import login_required, current_user
 from models import Business, DriverBusinessIDS, Offboarding, db, Driver, User, BusinessID, BusinessDriver
-from extensions import db, mail
+from extensions import db, mail, limiter
 from flask_mail import Message
 from datetime import datetime
 import os
 from utils.email_utils import send_password_change_email 
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
+from services.admin_service import (
+    update_driver_from_form,
+    delete_driver_and_offboarding,
+    create_user_from_form,
+    update_user_from_form,
+    delete_user as delete_user_service,
+    change_user_password,
+)
+from forms.common import CSRFOnlyForm, AddUserForm, AddDriverForm, ChangePasswordForm, EditUserForm
+from sqlalchemy.exc import IntegrityError
 
 # âœ… Blueprint for SuperAdmin/Admin
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -236,7 +246,7 @@ def dashboard():
 @admin_bp.route("/driver/<int:driver_id>/json")
 @login_required
 def driver_json(driver_id):
-    if current_user.role != "Admin":
+    if current_user.role not in ["Admin", "SuperAdmin"]:
         return {"error": "Access denied"}, 403
 
     driver = Driver.query.get_or_404(driver_id)
@@ -279,74 +289,102 @@ def driver_json(driver_id):
     }
 
     return driver_data
+
+
+# -------------------------
+# Add Driver
+# -------------------------
+@admin_bp.route("/driver/add", methods=["POST"])
+@login_required
+def add_driver():
+    if current_user.role not in ["Admin", "SuperAdmin"]:
+        flash("Access denied", "danger")
+        return redirect(url_for("auth.login"))
+
+    form = AddDriverForm()
+    if not form.validate_on_submit():
+        flash("Please correct the driver form.", "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    transfer_paid_at_raw = form.transfer_fee_paid_at.data
+    transfer_paid_at = None
+    if transfer_paid_at_raw:
+        try:
+            transfer_paid_at = datetime.fromisoformat(transfer_paid_at_raw)
+        except ValueError:
+            transfer_paid_at = None
+    driver = Driver(
+        name=form.name.data,
+        iqaama_number=form.iqaama_number.data,
+        iqaama_expiry=form.iqaama_expiry.data,
+        saudi_driving_license=form.saudi_driving_license.data == "true",
+        nationality=form.nationality.data,
+        city=form.city.data,
+        absher_number=form.absher_number.data,
+        previous_sponsor_number=form.previous_sponsor_number.data,
+        issued_mobile_number=form.issued_mobile_number.data,
+        issued_device_id=form.issued_device_id.data,
+        mobile_issued=form.mobile_issued.data == "true",
+        car_details=form.car_details.data,
+        assignment_date=form.assignment_date.data,
+        tamm_authorized=form.tamm_authorized.data == "true",
+        transfer_fee_paid=form.transfer_fee_paid.data == "true",
+        transfer_fee_amount=float(form.transfer_fee_amount.data) if form.transfer_fee_amount.data else None,
+        transfer_fee_paid_at=transfer_paid_at,
+        qiwa_contract_status=form.qiwa_contract_status.data or "Pending",
+        onboarding_stage=form.onboarding_stage.data or "Ops Manager",
+    )
+
+    db.session.add(driver)
+    try:
+        db.session.flush()
+    except IntegrityError as e:
+        db.session.rollback()
+        flash(f"Failed to create driver: {str(e.orig)}", "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    business_ids = request.form.getlist("business_id[]")
+    platform_ids = request.form.getlist("platform_id[]")
+    try:
+        if business_ids:
+            update_driver_from_form(driver, request.form, business_ids, platform_ids)
+        else:
+            db.session.commit()
+        flash(f"✅ Driver {driver.name} created successfully.", "success")
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Error creating driver")
+        flash(f"❌ Error creating driver: {str(e)}", "danger")
+
+    return redirect(url_for("admin.dashboard"))
+
 # -------------------------
 # Update Existing Driver
 # -------------------------
 @admin_bp.route("/driver/<int:driver_id>/update", methods=["POST"])
 @login_required
 def update_driver(driver_id):
-    if current_user.role != "Admin":
+    if current_user.role not in ["Admin", "SuperAdmin"]:
         flash("Access denied", "danger")
         return redirect(url_for("auth.login"))
 
+    form = AddDriverForm()
+    if not form.validate_on_submit():
+        flash("Please correct the driver form.", "danger")
+        return redirect(url_for("admin.dashboard"))
+
     driver = Driver.query.get_or_404(driver_id)
-
-    # Get all form data
-    form = request.form
-
     try:
-        # -------------------------
-        # Update basic fields
-        # -------------------------
-        bool_fields = ["saudi_driving_license", "mobile_issued", "tamm_authorized", "transfer_fee_paid"]
-        date_fields = ["iqaama_expiry", "assignment_date", "transfer_fee_paid_at"]
-
-        for field in form.keys():
-            value = form.get(field)
-            if field in bool_fields:
-                setattr(driver, field, value == "true")
-            elif field in date_fields:
-                setattr(driver, field, value or None)
-            else:
-                setattr(driver, field, value)
-
-        # -------------------------
-        # Update Business assignments
-        # -------------------------
         business_ids = request.form.getlist("business_id[]")
         platform_ids = request.form.getlist("platform_id[]")
-
-        # Mark old history links as transferred
-        old_links = DriverBusinessIDS.query.filter_by(driver_id=driver.id, transferred_at=None).all()
-        for old in old_links:
-            old.transferred_at = datetime.utcnow()
-
-        # Remove old active links
-        BusinessDriver.query.filter_by(driver_id=driver.id).delete()
-
-        # Add new assignments
-        for b_id, p_id in zip(business_ids, platform_ids):
-            db.session.add(DriverBusinessIDS(
-                driver_id=driver.id,
-                business_id_id=int(b_id),
-                assigned_at=datetime.utcnow(),
-                transferred_at=None
-            ))
-            db.session.add(BusinessDriver(
-                driver_id=driver.id,
-                business_id=int(b_id),
-                platform_id=int(p_id)
-            ))
-
-        db.session.commit()
+        update_driver_from_form(driver, request.form, business_ids, platform_ids)
         flash(f"✅ Driver {driver.name} updated successfully.", "success")
-        return redirect(url_for("admin.dashboard_admin"))
-
+        return redirect(url_for("admin.dashboard"))
     except Exception as e:
         db.session.rollback()
         current_app.logger.exception("Error updating driver")
         flash(f"❌ Error updating driver: {str(e)}", "danger")
-        return redirect(url_for("admin.dashboard_admin"))
+        return redirect(url_for("admin.dashboard"))
 
 
 # -------------------------
@@ -358,23 +396,18 @@ def delete_driver(driver_id):
     from app import db
     from models import Driver, Offboarding
 
-    # Get the driver or 404 if not found
-    driver = Driver.query.get_or_404(driver_id)
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.dashboard"))
 
     try:
-        # ðŸ§¹ First, delete all related offboarding records
-        Offboarding.query.filter_by(driver_id=driver.id).delete()
-
-        # ðŸ§¹ Now delete the driver
-        db.session.delete(driver)
-        db.session.commit()
-
+        delete_driver_and_offboarding(driver_id)
         flash("Driver and related offboarding records deleted successfully.", "success")
     except Exception as e:
         db.session.rollback()
         flash(f"Error deleting driver: {str(e)}", "danger")
 
-    # Redirect back to admin dashboard
     return redirect(url_for("admin.dashboard"))
 
 # -------------------------
@@ -386,28 +419,29 @@ def add_user():
     if current_user.role != "SuperAdmin":
         return "Access Denied", 403
 
-    username = request.form["username"]
-    raw_password = request.form["password"]
-    hashed_password = generate_password_hash(raw_password)
-    role = request.form["role"]
-    name = request.form["name"]
-    designation = request.form["designation"]
-    branch_city = request.form["branch_city"]
-    email = request.form["email"]
+    form = AddUserForm()
+    if not form.validate_on_submit():
+        flash("Please correct the user form.", "danger")
+        return redirect(url_for("admin.dashboard"))
 
-    new_user = User(
-        username=username,
-        password=hashed_password,
-        role=role,
-        name=name,
-        designation=designation,
-        branch_city=branch_city,
-        email=email
-    )
+    username = form.username.data
+    raw_password = form.password.data
+    role = form.role.data
+    name = form.name.data
+    designation = form.designation.data
+    branch_city = form.branch_city.data
+    email = form.email.data
 
     try:
-        db.session.add(new_user)
-        db.session.commit()
+        new_user = create_user_from_form(
+            username=username,
+            raw_password=raw_password,
+            role=role,
+            name=name,
+            designation=designation,
+            branch_city=branch_city,
+            email=email,
+        )
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to create user: {e}", "danger")
@@ -483,16 +517,26 @@ def edit_user(user_id):
         flash("Access Denied", "danger")
         return redirect(url_for("admin.dashboard"))
 
-    user = User.query.get_or_404(user_id)
-    user.username = request.form.get("username", user.username)
-    user.name = request.form.get("name", user.name)
-    user.designation = request.form.get("designation", user.designation)
-    user.branch_city = request.form.get("branch_city", user.branch_city)
-    user.email = request.form.get("email", user.email)
-    user.role = request.form.get("role", user.role)
+    form = EditUserForm()
+    if not form.validate_on_submit():
+        flash("Invalid or incomplete user data.", "danger")
+        return redirect(url_for("admin.dashboard"))
 
-    db.session.commit()
-    flash(f"User {user.username} updated successfully.", "success")
+    user = User.query.get_or_404(user_id)
+    try:
+        update_user_from_form(
+            user,
+            username=form.username.data or user.username,
+            name=form.name.data or user.name,
+            designation=form.designation.data or user.designation,
+            branch_city=form.branch_city.data or user.branch_city,
+            email=form.email.data or user.email,
+            role=form.role.data or user.role,
+        )
+        flash(f"User {user.username} updated successfully.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to update user: {e}", "danger")
     return redirect(url_for("admin.dashboard"))
 
 # -------------------------
@@ -505,17 +549,25 @@ def delete_user(user_id):
         flash("Access Denied", "danger")
         return redirect(url_for("admin.dashboard"))
 
-    user = User.query.get_or_404(user_id)
-    db.session.delete(user)
-    db.session.commit()
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.dashboard"))
 
-    flash(f"User {user.username} deleted successfully.", "success")
+    user = User.query.get_or_404(user_id)
+    try:
+        delete_user_service(user)
+        flash(f"User {user.username} deleted successfully.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Failed to delete user: {e}", "danger")
     return redirect(url_for("admin.dashboard"))
 
 # -------------------------
 # Change Password (for SuperAdmin)
 # -------------------------
 @admin_bp.route("/change_password", methods=["POST"])
+@limiter.limit("5 per minute")
 @login_required
 def change_password():
     """Allow SuperAdmin to change their password securely and send email notification."""
@@ -523,32 +575,27 @@ def change_password():
         flash("Access Denied", "danger")
         return redirect(url_for("admin.dashboard"))
 
-    current_password = request.form.get("current_password", "")
-    new_password = request.form.get("new_password", "")
-    confirm_password = request.form.get("confirm_password", "")
-
-    if not current_password or not new_password or not confirm_password:
-        flash("Please fill all password fields.", "danger")
+    form = ChangePasswordForm()
+    if not form.validate_on_submit():
+        flash("Please correct the password form.", "danger")
         return redirect(url_for("admin.dashboard"))
+
+    current_password = form.current_password.data
+    new_password = form.new_password.data
 
     if not check_password_hash(current_user.password, current_password):
         flash("Current password is incorrect.", "danger")
         return redirect(url_for("admin.dashboard"))
 
-    if new_password != confirm_password:
-        flash("New passwords do not match.", "danger")
-        return redirect(url_for("admin.dashboard"))
-
     try:
         # Update password in database
-        current_user.password = generate_password_hash(new_password)
-        db.session.commit()
+        change_user_password(current_user, new_password)
 
         # Send email notification using helper
         if send_password_change_email(current_user, new_password):
-            flash("âœ… Password updated and email notification sent.", "success")
+            flash("Password updated and email notification sent.", "success")
         else:
-            flash("âœ… Password updated, but email could not be sent.", "warning")
+            flash("Password updated, but email could not be sent.", "warning")
 
     except Exception as e:
         db.session.rollback()

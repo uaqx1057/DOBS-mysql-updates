@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ current_lang or 'en' }}" dir="{{ text_direction or 'ltr' }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -347,62 +347,65 @@
   </style>
 </head>
 <body>
+{% macro tr(en_text, ar_text) -%}
+  {{ en_text if (current_lang or 'en') == 'en' else ar_text }}
+{%- endmacro %}
 
   <!-- Page Header -->
   <div class="page-header">
     <div class="container-main">
       <h1 class="page-title">
         <i class="fas fa-chart-bar"></i>
-        Driver Reports
+        {{ tr('Driver Reports', 'تقارير السائقين') }}
       </h1>
-      <p class="page-subtitle">Comprehensive reporting and analytics for driver management</p>
+      <p class="page-subtitle">{{ tr('Comprehensive reporting and analytics for driver management', 'تقارير وتحليلات شاملة لإدارة السائقين') }}</p>
     </div>
   </div>
 
   <div class="container-main">
     <!-- ================== Filters ================== -->
     <div class="filter-section">
-      <h6 class="filter-title"><i class="fas fa-filter"></i> Report Filters</h6>
+      <h6 class="filter-title"><i class="fas fa-filter"></i> {{ tr('Report Filters', 'فلاتر التقرير') }}</h6>
       <form method="POST" class="row g-3">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {{ form.hidden_tag() }}
       <div class="col-md-2">
-        <label class="form-label">Report Type</label>
+        <label class="form-label">{{ tr('Report Type', 'نوع التقرير') }}</label>
         <select class="form-select" name="report_type">
-          <option value="onboarding" {% if report_type=='onboarding' %}selected{% endif %}>Onboarded</option>
-        <option value="pending_onboarding" {% if report_type=='pending_onboarding' %}selected{% endif %}>Pending Onboarding</option>
-        <option value="offboarding" {% if report_type=='offboarding' %}selected{% endif %}>Completed Offboarding</option>
-        <option value="pending_offboarding" {% if report_type=='pending_offboarding' %}selected{% endif %}>Pending Offboarding</option>
-          <option value="rejected" {% if report_type=='rejected' %}selected{% endif %}>Rejected</option>
+          <option value="onboarding" {% if report_type=='onboarding' %}selected{% endif %}>{{ tr('Onboarded', 'المكتملون') }}</option>
+        <option value="pending_onboarding" {% if report_type=='pending_onboarding' %}selected{% endif %}>{{ tr('Pending Onboarding', 'قيد الإكمال') }}</option>
+        <option value="offboarding" {% if report_type=='offboarding' %}selected{% endif %}>{{ tr('Completed Offboarding', 'إخلاء مكتمل') }}</option>
+        <option value="pending_offboarding" {% if report_type=='pending_offboarding' %}selected{% endif %}>{{ tr('Pending Offboarding', 'إخلاء قيد الإنجاز') }}</option>
+          <option value="rejected" {% if report_type=='rejected' %}selected{% endif %}>{{ tr('Rejected', 'مرفوضون') }}</option>
         </select>
       </div>
       <div class="col-md-2">
-        <label class="form-label">Start Date</label>
+        <label class="form-label">{{ tr('Start Date', 'تاريخ البدء') }}</label>
           <input type="date" class="form-control" name="start_date" value="{{ start_date or '' }}">
       </div>
       <div class="col-md-2">
-        <label class="form-label">End Date</label>
+        <label class="form-label">{{ tr('End Date', 'تاريخ الانتهاء') }}</label>
           <input type="date" class="form-control" name="end_date" value="{{ end_date or '' }}">
       </div>
       <div class="col-md-2">
-        <label class="form-label">City</label>
+        <label class="form-label">{{ tr('City', 'المدينة') }}</label>
         <select class="form-select" name="city">
-        <option value="All" {% if city=='All' or not city %}selected{% endif %}>All Cities</option>
+        <option value="All" {% if city=='All' or not city %}selected{% endif %}>{{ tr('All Cities', 'كل المدن') }}</option>
         {% for c in saudi_cities %}
           <option value="{{ c }}" {% if city==c %}selected{% endif %}>{{ c }}</option>
         {% endfor %}
         </select>
       </div>
       <div class="col-md-2">
-        <label class="form-label">Transfer Status</label>
+        <label class="form-label">{{ tr('Transfer Status', 'حالة النقل') }}</label>
         <select class="form-select" name="transfer_status">
-        <option value="" {% if transfer_status=='' or not transfer_status %}selected{% endif %}>All</option>
-        <option value="transferred" {% if transfer_status=='transferred' %}selected{% endif %}>Transferred</option>
-          <option value="not_transferred" {% if transfer_status=='not_transferred' %}selected{% endif %}>Not Transferred</option>
+        <option value="" {% if transfer_status=='' or not transfer_status %}selected{% endif %}>{{ tr('All', 'الكل') }}</option>
+        <option value="transferred" {% if transfer_status=='transferred' %}selected{% endif %}>{{ tr('Transferred', 'تم النقل') }}</option>
+          <option value="not_transferred" {% if transfer_status=='not_transferred' %}selected{% endif %}>{{ tr('Not Transferred', 'لم يتم النقل') }}</option>
         </select>
       </div>
       <div class="col-md-2">
         <label class="form-label">&nbsp;</label>
-        <button type="submit" class="btn btn-generate w-100"><i class="fas fa-sync-alt me-2"></i>Generate Report</button>
+        <button type="submit" class="btn btn-generate w-100"><i class="fas fa-sync-alt me-2"></i>{{ tr('Generate Report', 'توليد التقرير') }}</button>
       </div>
       </form>
     </div>
@@ -410,27 +413,27 @@
     <!-- ================== Summary Cards ================== -->
     <div class="stats-grid">
       <div class="stat-card primary">
-        <div class="stat-label"><i class="fas fa-users"></i> Total Drivers</div>
+        <div class="stat-label"><i class="fas fa-users"></i> {{ tr('Total Drivers', 'إجمالي السائقين') }}</div>
         <div class="stat-value">{{ total_drivers }}</div>
       </div>
       <div class="stat-card success">
-        <div class="stat-label"><i class="fas fa-check-circle"></i> Completed Onboarded</div>
+        <div class="stat-label"><i class="fas fa-check-circle"></i> {{ tr('Completed Onboarded', 'المكتملون') }}</div>
         <div class="stat-value">{{ completed_onboarded }}</div>
       </div>
       <div class="stat-card warning">
-        <div class="stat-label"><i class="fas fa-clock"></i> Pending Onboarded</div>
+        <div class="stat-label"><i class="fas fa-clock"></i> {{ tr('Pending Onboarded', 'قيد الإكمال') }}</div>
         <div class="stat-value">{{ pending_onboarded }}</div>
       </div>
       <div class="stat-card info">
-        <div class="stat-label"><i class="fas fa-user-check"></i> Completed Offboarded</div>
+        <div class="stat-label"><i class="fas fa-user-check"></i> {{ tr('Completed Offboarded', 'إخلاء مكتمل') }}</div>
         <div class="stat-value">{{ completed_offboarded }}</div>
       </div>
       <div class="stat-card warning">
-        <div class="stat-label"><i class="fas fa-hourglass-half"></i> Pending Offboarded</div>
+        <div class="stat-label"><i class="fas fa-hourglass-half"></i> {{ tr('Pending Offboarded', 'إخلاء قيد الإنجاز') }}</div>
         <div class="stat-value">{{ pending_offboarded }}</div>
       </div>
       <div class="stat-card danger">
-        <div class="stat-label"><i class="fas fa-times-circle"></i> Rejected Drivers</div>
+        <div class="stat-label"><i class="fas fa-times-circle"></i> {{ tr('Rejected Drivers', 'السائقون المرفوضون') }}</div>
         <div class="stat-value">{{ rejected_drivers }}</div>
       </div>
     </div>
@@ -438,40 +441,40 @@
     <!-- ================== Additional Reports ================== -->
     <div class="stats-grid">
       <div class="stat-card secondary">
-        <div class="stat-label"><i class="fas fa-calendar-alt"></i> Monthly Transfers</div>
+        <div class="stat-label"><i class="fas fa-calendar-alt"></i> {{ tr('Monthly Transfers', 'التحويلات الشهرية') }}</div>
         <div class="stat-value">{{ monthly_transfers_completed }}</div>
       </div>
       <div class="stat-card primary">
-        <div class="stat-label"><i class="fas fa-user-tie"></i> Pending Ops Manager</div>
+        <div class="stat-label"><i class="fas fa-user-tie"></i> {{ tr('Pending Ops Manager', 'المعلَّق لدى مدير العمليات') }}</div>
         <div class="stat-value">{{ pending_ops_manager }}</div>
       </div>
       <div class="stat-card success">
-        <div class="stat-label"><i class="fas fa-user-friends"></i> Pending HR</div>
+        <div class="stat-label"><i class="fas fa-user-friends"></i> {{ tr('Pending HR', 'المعلَّق لدى الموارد البشرية') }}</div>
         <div class="stat-value">{{ pending_hr }}</div>
       </div>
       <div class="stat-card warning">
-        <div class="stat-label"><i class="fas fa-user-cog"></i> Pending Ops Supervisor</div>
+        <div class="stat-label"><i class="fas fa-user-cog"></i> {{ tr('Pending Ops Supervisor', 'المعلَّق لدى مشرف العمليات') }}</div>
         <div class="stat-value">{{ pending_ops_supervisor }}</div>
       </div>
       <div class="stat-card info">
-        <div class="stat-label"><i class="fas fa-car"></i> Pending Fleet Manager</div>
+        <div class="stat-label"><i class="fas fa-car"></i> {{ tr('Pending Fleet Manager', 'المعلَّق لدى مدير الأسطول') }}</div>
         <div class="stat-value">{{ pending_fleet_manager }}</div>
       </div>
       <div class="stat-card danger">
-        <div class="stat-label"><i class="fas fa-dollar-sign"></i> Pending Finance</div>
+        <div class="stat-label"><i class="fas fa-dollar-sign"></i> {{ tr('Pending Finance', 'المعلَّق لدى المالية') }}</div>
         <div class="stat-value">{{ pending_finance }}</div>
       </div>
     </div>
 
     <!-- ================== Export Buttons ================== -->
     <div class="export-section">
-      <h6 class="export-title"><i class="fas fa-download"></i> Export Report</h6>
+      <h6 class="export-title"><i class="fas fa-download"></i> {{ tr('Export Report', 'تصدير التقرير') }}</h6>
       <div class="export-buttons">
         <a href="{{ url_for('reports_bp.export_csv', report_type=report_type, start_date=start_date, end_date=end_date, city=city, transfer_status=transfer_status) }}" class="btn-export btn-csv">
-          <i class="fas fa-file-csv"></i> Export CSV
+          <i class="fas fa-file-csv"></i> {{ tr('Export CSV', 'تصدير CSV') }}
         </a>
         <a href="{{ url_for('reports_bp.export_pdf', report_type=report_type, start_date=start_date, end_date=end_date, city=city, transfer_status=transfer_status) }}" class="btn-export btn-pdf">
-          <i class="fas fa-file-pdf"></i> Export PDF
+          <i class="fas fa-file-pdf"></i> {{ tr('Export PDF', 'تصدير PDF') }}
         </a>
       </div>
     </div>
@@ -480,20 +483,20 @@
     {% if drivers %}
     <div class="table-card">
       <div class="table-header">
-        <h5><i class="fas fa-table"></i> Driver Records ({{ drivers|length }} entries)</h5>
+        <h5><i class="fas fa-table"></i> {{ tr('Driver Records', 'سجلات السائقين') }} ({{ drivers|length }} {{ tr('entries', 'سجل') }})</h5>
       </div>
       <div class="table-responsive">
         <table class="table">
           <thead>
             <tr>
-          <th>ID</th>
-          <th>Full Name</th>
-          <th>Iqama Number</th>
-          <th>City</th>
-          <th>Platforms</th>
-          <th>Assignment Date</th>
-          <th>Transfer Done</th>
-          <th>Onboarding Stage</th>
+          <th>{{ tr('ID', 'المعرف') }}</th>
+          <th>{{ tr('Full Name', 'الاسم الكامل') }}</th>
+          <th>{{ tr('Iqama Number', 'رقم الإقامة') }}</th>
+          <th>{{ tr('City', 'المدينة') }}</th>
+          <th>{{ tr('Platforms', 'المنصات') }}</th>
+          <th>{{ tr('Assignment Date', 'تاريخ التعيين') }}</th>
+          <th>{{ tr('Transfer Done', 'تم النقل') }}</th>
+          <th>{{ tr('Onboarding Stage', 'مرحلة الانضمام') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -517,13 +520,13 @@
           <!-- Transfer Done Badge -->
           <td>
             {% if d.sponsorship_transfer_status in ['Completed', 'Transferred', 'Approved'] %}
-              <span class="badge bg-success">Yes</span>
+              <span class="badge bg-success">{{ tr('Yes', 'نعم') }}</span>
             {% elif d.sponsorship_transfer_status == 'Pending' %}
-              <span class="badge bg-warning text-dark">No</span>
+              <span class="badge bg-warning text-dark">{{ tr('No', 'لا') }}</span>
             {% elif d.sponsorship_transfer_status == 'Not Required' %}
-              <span class="badge bg-secondary">N/A</span>
+              <span class="badge bg-secondary">{{ tr('N/A', 'غير مطلوب') }}</span>
             {% else %}
-              <span class="badge bg-secondary">Unknown</span>
+              <span class="badge bg-secondary">{{ tr('Unknown', 'غير معروف') }}</span>
             {% endif %}
           </td>
 
@@ -532,17 +535,17 @@
           <td>
             {% set stage = d.onboarding_stage or 'Pending' %}
             {% if stage == 'Completed' %}
-              <span class="badge bg-success">{{ stage }}</span>
+              <span class="badge bg-success">{{ tr('Completed', 'مكتمل') }}</span>
             {% elif stage in ['Ops Manager', 'HR'] %}
-              <span class="badge bg-primary">{{ stage }}</span>
+              <span class="badge bg-primary">{{ tr(stage, stage) }}</span>
             {% elif stage in ['Ops Supervisor', 'Fleet Manager'] %}
-              <span class="badge bg-info text-dark">{{ stage }}</span>
+              <span class="badge bg-info text-dark">{{ tr(stage, stage) }}</span>
             {% elif stage == 'Finance' %}
-              <span class="badge bg-warning text-dark">{{ stage }}</span>
+              <span class="badge bg-warning text-dark">{{ tr('Finance', 'المالية') }}</span>
             {% elif stage == 'Rejected' %}
-              <span class="badge bg-danger">{{ stage }}</span>
+              <span class="badge bg-danger">{{ tr('Rejected', 'مرفوض') }}</span>
             {% else %}
-              <span class="badge bg-secondary">{{ stage }}</span>
+              <span class="badge bg-secondary">{{ tr(stage, 'قيد المعالجة') }}</span>
             {% endif %}
           </td>
         </tr>
@@ -555,11 +558,12 @@
     <div class="table-card">
       <div class="no-data">
         <i class="fas fa-inbox"></i>
-        <p>No drivers found for selected filters.<br>Try adjusting your filter criteria.</p>
+        <p>{{ tr('No drivers found for selected filters.<br>Try adjusting your filter criteria.', 'لا توجد سائقون وفق الفلاتر المحددة.<br>حاول تعديل معايير الفلترة.') }}</p>
       </div>
     </div>
     {% endif %}
   </div>
 
+{% include 'includes/csrf_auto.html' %}
 </body>
 </html>

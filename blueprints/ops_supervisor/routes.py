@@ -1,14 +1,31 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, session
 from flask_login import login_required, current_user
 from models import Driver, User, BusinessDriver, Business, BusinessID, Offboarding, DriverBusinessIDS
-from extensions import db, mail
+from extensions import db, mail, limiter
 from flask_mail import Message
 from werkzeug.security import check_password_hash, generate_password_hash
 from datetime import datetime
 from utils.email_utils import send_password_change_email
 from sqlalchemy import func
+from flask_wtf.csrf import validate_csrf, CSRFError
+from forms.common import CSRFOnlyForm, ChangePasswordForm, OpsSupervisorApproveForm
 
 ops_supervisor_bp = Blueprint("ops_supervisor", __name__)
+
+
+def _validate_csrf():
+    """Validate CSRF token from form or X-CSRFToken header."""
+    header_token = request.headers.get("X-CSRFToken")
+    if header_token:
+        try:
+            validate_csrf(header_token)
+            return True
+        except CSRFError as exc:
+            current_app.logger.warning("[OPS_SUPERVISOR] Header CSRF failed: %s", exc)
+            return False
+
+    form = CSRFOnlyForm()
+    return form.validate_on_submit()
 
 
 # -------------------------
@@ -92,20 +109,25 @@ def dashboard_ops_supervisor():
 # Approve Driver (POST only)
 # -------------------------
 @ops_supervisor_bp.route("/approve_driver/<int:driver_id>", methods=["POST"])
+@limiter.limit("30 per minute")
 @login_required
 def approve_driver(driver_id):
     if current_user.role != "OpsSupervisor":
         flash("Access denied. Ops Supervisor role required.", "danger")
         return redirect(url_for("auth.login"))
 
+    form = OpsSupervisorApproveForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
+        return redirect(url_for("ops_supervisor.dashboard_ops_supervisor"))
+
     driver = Driver.query.get_or_404(driver_id)
     current_app.logger.info(f"[OPS_SUPERVISOR][START] driver_id={driver_id} form={dict(request.form)}")
 
-    # Get form data
-    platform_ids = request.form.getlist("platform_id[]")  # BusinessID IDs
-    issued_mobile_number = (request.form.get("issued_mobile_number") or "").strip() or None
-    issued_device_id = (request.form.get("issued_device_id") or "").strip() or None
-    mobile_issued = bool(request.form.get("mobile_issued"))
+    platform_ids = [pid for pid in (form.platform_ids_csv.data or "").split(",") if pid]
+    issued_mobile_number = (form.issued_mobile_number.data or "").strip() or None
+    issued_device_id = (form.issued_device_id.data or "").strip() or None
+    mobile_issued = bool(form.mobile_issued.data)
 
     if not platform_ids:
         flash("Please choose at least one business ID.", "danger")
@@ -254,17 +276,22 @@ def approve_driver(driver_id):
 # Change Password
 # -------------------------
 @ops_supervisor_bp.route("/change_password", methods=["POST"])
+@limiter.limit("5 per minute")
 @login_required
 def change_password():
     if current_user.role != "OpsSupervisor":
         flash("Access denied. Ops Supervisor role required.", "danger")
         return redirect(url_for("auth.login"))
 
-    current_password = request.form.get("current_password", "")
-    new_password = request.form.get("new_password", "")
-    confirm_password = request.form.get("confirm_password", "")
+    form = ChangePasswordForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
+        return redirect(url_for("ops_supervisor.dashboard_ops_supervisor"))
 
-    if not check_password_hash(current_user.password, current_password):
+    new_password = form.new_password.data
+    confirm_password = form.confirm_password.data
+
+    if not check_password_hash(current_user.password, form.current_password.data):
         flash("❌ Current password is incorrect.", "danger")
         return redirect(url_for("ops_supervisor.dashboard_ops_supervisor"))
 
@@ -332,6 +359,9 @@ def offboarding_dashboard():
 def api_clear_offboarding(offboarding_id):
     if current_user.role != "OpsSupervisor":
         return {"success": False, "message": "Access denied"}, 403
+
+    if not _validate_csrf():
+        return {"success": False, "message": "Invalid CSRF token"}, 400
 
     record = Offboarding.query.get_or_404(offboarding_id)
 

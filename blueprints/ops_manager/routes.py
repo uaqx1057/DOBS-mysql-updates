@@ -4,10 +4,18 @@ import smtplib
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask_login import login_required, current_user
 from models import Driver, Offboarding, User
-from extensions import db, mail
+from extensions import db, mail, limiter
 from flask_mail import Message
 from datetime import datetime
 from werkzeug.exceptions import BadRequest
+from flask_wtf.csrf import validate_csrf, CSRFError
+from forms.common import (
+    CSRFOnlyForm,
+    ChangePasswordForm,
+    OpsManagerApproveForm,
+    OpsManagerRejectForm,
+    OpsManagerOffboardingForm,
+)
 from utils.email_utils import send_password_change_email 
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask import jsonify
@@ -15,6 +23,21 @@ from flask import jsonify
 
  
 ops_manager_bp = Blueprint("ops_manager", __name__)
+
+
+def _validate_csrf():
+    """Validate CSRF token from form or X-CSRFToken header."""
+    header_token = request.headers.get("X-CSRFToken")
+    if header_token:
+        try:
+            validate_csrf(header_token)
+            return True
+        except CSRFError as exc:
+            current_app.logger.warning("[OPS_MANAGER] Header CSRF failed: %s", exc)
+            return False
+
+    form = CSRFOnlyForm()
+    return form.validate_on_submit()
 
 @ops_manager_bp.route("/dashboard")
 @login_required
@@ -93,6 +116,7 @@ def dashboard_ops():
 # Approve Driver & Send to HR
 # -------------------------
 @ops_manager_bp.route("/approve_driver/<int:driver_id>", methods=["POST"])
+@limiter.limit("30 per minute")
 @login_required
 def approve_driver(driver_id):
     """
@@ -106,6 +130,11 @@ def approve_driver(driver_id):
         flash("Access denied. Ops Manager role required.", "danger")
         return redirect(url_for("auth.login"))
 
+    form = OpsManagerApproveForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
+        return redirect(url_for("ops_manager.dashboard_ops"))
+
     driver = Driver.query.get_or_404(driver_id)
 
     # Validate stage to avoid re-processing
@@ -114,7 +143,7 @@ def approve_driver(driver_id):
         return redirect(url_for("ops_manager.dashboard_ops"))
 
     # Optional: allow ops manager to add a short note (not required)
-    ops_note = request.form.get("ops_note", "").strip()
+    ops_note = form.ops_note.data.strip() if form.ops_note.data else ""
 
     # Mark approved only if not already approved
     if not getattr(driver, "ops_manager_approved", False):
@@ -248,6 +277,7 @@ def approve_driver(driver_id):
 # Reject Driver
 # -------------------------
 @ops_manager_bp.route("/reject_driver/<int:driver_id>", methods=["POST"])
+@limiter.limit("20 per minute")
 @login_required
 def reject_driver(driver_id):
     """
@@ -260,6 +290,11 @@ def reject_driver(driver_id):
         flash("Access denied. Ops Manager role required.", "danger")
         return redirect(url_for("auth.login"))
 
+    form = OpsManagerRejectForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
+        return redirect(url_for("ops_manager.dashboard_ops"))
+
     driver = Driver.query.get_or_404(driver_id)
 
     # Validate stage
@@ -268,7 +303,7 @@ def reject_driver(driver_id):
         return redirect(url_for("ops_manager.dashboard_ops"))
 
     # Get reason from form
-    reject_reason = request.form.get("reject_reason", "").strip()
+    reject_reason = (form.reject_reason.data or "").strip()
 
     # Update driver record
     driver.onboarding_stage = "Rejected"
@@ -294,6 +329,7 @@ def reject_driver(driver_id):
 # Change Password
 # -------------------------
 @ops_manager_bp.route("/change_password", methods=["POST"])
+@limiter.limit("5 per minute")
 @login_required
 def change_password():
     """Allow Ops Manager to change their own password securely and send email notification."""
@@ -301,15 +337,15 @@ def change_password():
         flash("Access denied. Ops Manager role required.", "danger")
         return redirect(url_for("auth.login"))
 
-    current_password = request.form.get("current_password", "")
-    new_password = request.form.get("new_password", "")
-    confirm_password = request.form.get("confirm_password", "")
-
-    if not current_password or not new_password or not confirm_password:
-        flash("Please fill all password fields.", "danger")
+    form = ChangePasswordForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
         return redirect(url_for("ops_manager.dashboard_ops"))
 
-    if not check_password_hash(current_user.password, current_password):
+    new_password = form.new_password.data
+    confirm_password = form.confirm_password.data
+
+    if not check_password_hash(current_user.password, form.current_password.data):
         flash("Current password is incorrect.", "danger")
         return redirect(url_for("ops_manager.dashboard_ops"))
 
@@ -343,6 +379,11 @@ def change_password():
 def request_offboarding(driver_id):
     if current_user.role != "OpsManager":  # ✅ fixed (no space)
         flash("Access denied", "danger")
+        return redirect(url_for("ops_manager.dashboard_ops"))
+
+    form = OpsManagerOffboardingForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
         return redirect(url_for("ops_manager.dashboard_ops"))
 
     driver = Driver.query.get_or_404(driver_id)
@@ -458,6 +499,9 @@ def api_request_offboarding(driver_id):
     if current_user.role != "OpsManager":
         return {"success": False, "message": "Access denied"}, 403
 
+    if not _validate_csrf():
+        return {"success": False, "message": "Invalid CSRF token"}, 400
+
     driver = Driver.query.get_or_404(driver_id)
     if driver.onboarding_stage != "Completed":
         return {"success": False, "message": "Only completed drivers can be offboarded."}, 400
@@ -570,6 +614,10 @@ def reject_offboarding(driver_id):
     if current_user.role != "OpsManager":
         flash("Access denied. Ops Manager role required.", "danger")
         return redirect(url_for("auth.login"))
+
+    if not _validate_csrf():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
+        return redirect(url_for("ops_manager.dashboard_ops"))
 
     driver = Driver.query.get_or_404(driver_id)
 

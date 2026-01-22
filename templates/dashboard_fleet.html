@@ -128,6 +128,7 @@
     <div id="driverDetails"></div>
 
     <form id="fleetOnboardingForm" method="POST" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Vehicle Plate Number</label>
       <input type="text" name="vehicle_plate" required>
 
@@ -262,6 +263,7 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
 
         <form id="offboardingForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" id="offboardingId">
 
           <label><input type="checkbox" id="carReturned" required> Car Returned</label>
@@ -289,6 +291,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <span class="close" onclick="closeModal('passwordModal')">&times;</span>
         </div>
         <form method="POST" action="{{ url_for('fleet.change_password') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="password" name="current_password" placeholder="Current Password" required>
           <input type="password" name="new_password" placeholder="New Password" required>
           <input type="password" name="confirm_password" placeholder="Confirm Password" required>
@@ -380,7 +383,10 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const res = await fetch(`/dashboard/fleet/api/offboarding_action/${currentOffboardingId}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": "{{ csrf_token() }}"
+        },
         body: JSON.stringify(payload)
       });
 
@@ -405,5 +411,6 @@ function openPasswordModal() {
 </script>
 
 
+{% include 'includes/csrf_auto.html' %}
 </body>
 </html>

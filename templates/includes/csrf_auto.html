@@ -1,0 +1,23 @@
+<script>
+// Inject CSRF token into all POST forms that do not already include it
+// This is a defensive layer for legacy templates without WTForms rendering.
+document.addEventListener('DOMContentLoaded', function () {
+  const token = "{{ csrf_token() }}";
+  if (!token) {
+    return;
+  }
+  document.querySelectorAll('form').forEach(function (form) {
+    if ((form.getAttribute('method') || '').toLowerCase() !== 'post') {
+      return;
+    }
+    if (form.querySelector('input[name="csrf_token"]')) {
+      return;
+    }
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'csrf_token';
+    input.value = token;
+    form.appendChild(input);
+  });
+});
+</script>

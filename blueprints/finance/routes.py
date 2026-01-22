@@ -7,11 +7,33 @@ from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_mail import Message
 from sqlalchemy import exists
-from extensions import db, mail
+from extensions import db, mail, limiter
 from models import Driver, User, Offboarding
-from utils.email_utils import send_password_change_email
+from utils.email_utils import send_password_change_email, safe_send_email
+from flask_wtf.csrf import validate_csrf, CSRFError
+from forms.common import (
+    CSRFOnlyForm,
+    ChangePasswordForm,
+    FinanceApproveForm,
+    FinanceOffboardingClearForm,
+)
 
 finance_bp = Blueprint("finance", __name__)
+
+
+def _validate_csrf():
+    """Validate CSRF token from form or X-CSRFToken header."""
+    header_token = request.headers.get("X-CSRFToken")
+    if header_token:
+        try:
+            validate_csrf(header_token)
+            return True
+        except CSRFError as exc:
+            current_app.logger.warning("[FINANCE] Header CSRF failed: %s", exc)
+            return False
+
+    form = CSRFOnlyForm()
+    return form.validate_on_submit()
 
 # -------------------------
 # Config
@@ -127,21 +149,27 @@ def dashboard_finance():
 # Approve Driver
 # -------------------------
 @finance_bp.route("/approve_driver/<int:driver_id>", methods=["POST"])
+@limiter.limit("30 per minute")
 @login_required
 def approve_driver(driver_id):
     if current_user.role != "FinanceManager":
         flash("Access denied. Finance Manager role required.", "danger")
         return redirect(url_for("auth.login"))
 
+    form = FinanceApproveForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
+        return redirect(url_for("finance.dashboard_finance"))
+
     driver = Driver.query.get_or_404(driver_id)
 
     # Collect form data
-    driver.transfer_fee_paid = bool(request.form.get("transfer_fee_paid"))
-    amount = request.form.get("transfer_fee_amount")
+    driver.transfer_fee_paid = bool(form.transfer_fee_paid.data)
+    amount = form.transfer_fee_amount.data
     driver.transfer_fee_amount = float(amount) if amount else None
 
     # Validate payment date
-    paid_at_str = request.form.get("transfer_fee_paid_at")
+    paid_at_str = form.transfer_fee_paid_at.data
     if paid_at_str:
         try:
             if "T" in paid_at_str:
@@ -161,6 +189,19 @@ def approve_driver(driver_id):
     # Handle file upload
     file = request.files.get("transfer_fee_receipt")
     if file and file.filename:
+        content_type = (file.mimetype or "").lower()
+        if not (content_type.startswith("image/") or content_type == "application/pdf"):
+            flash("❌ Invalid file content. Only images or PDF are accepted.", "danger")
+            return redirect(url_for("finance.dashboard_finance"))
+
+        max_len = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
+        file.stream.seek(0, os.SEEK_END)
+        size = file.stream.tell()
+        file.stream.seek(0)
+        if size > max_len:
+            flash("❌ File too large. Maximum 16 MB.", "danger")
+            return redirect(url_for("finance.dashboard_finance"))
+
         if not allowed_file(file.filename):
             flash("❌ Invalid file type. Allowed: JPG, JPEG, PNG, PDF.", "danger")
             return redirect(url_for("finance.dashboard_finance"))
@@ -275,7 +316,7 @@ def approve_driver(driver_id):
             </html>
             """
 
-            mail.send(msg)
+            safe_send_email(msg, current_app.logger)
 
 
 
@@ -291,21 +332,22 @@ def approve_driver(driver_id):
 # Change Password
 # -------------------------
 @finance_bp.route("/change_password", methods=["POST"])
+@limiter.limit("5 per minute")
 @login_required
 def change_password():
     if current_user.role != "FinanceManager":
         flash("Access denied. Finance Manager role required.", "danger")
         return redirect(url_for("auth.login"))
 
-    current_password = request.form.get("current_password", "")
-    new_password = request.form.get("new_password", "")
-    confirm_password = request.form.get("confirm_password", "")
-
-    if not all([current_password, new_password, confirm_password]):
-        flash("Please fill all password fields.", "danger")
+    form = ChangePasswordForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
         return redirect(url_for("finance.dashboard_finance"))
 
-    if not check_password_hash(current_user.password, current_password):
+    new_password = form.new_password.data
+    confirm_password = form.confirm_password.data
+
+    if not check_password_hash(current_user.password, form.current_password.data):
         flash("Current password is incorrect.", "danger")
         return redirect(url_for("finance.dashboard_finance"))
 
@@ -332,10 +374,16 @@ def change_password():
 # Clear Offboarding
 # -------------------------
 @finance_bp.route("/offboarding/clear/<int:offboarding_id>", methods=["POST"])
+@limiter.limit("30 per minute")
 @login_required
 def clear_offboarding(offboarding_id):
     if current_user.role != "FinanceManager":
         flash("Access denied. Finance Manager role required.", "danger")
+        return redirect(url_for("finance.dashboard_finance"))
+
+    form = FinanceOffboardingClearForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
         return redirect(url_for("finance.dashboard_finance"))
 
     record = Offboarding.query.get_or_404(offboarding_id)
@@ -343,12 +391,25 @@ def clear_offboarding(offboarding_id):
     try:
         record.finance_cleared = True
         record.finance_cleared_at = datetime.utcnow()
-        record.finance_adjustments = float(request.form.get("finance_adjustments") or 0)
-        record.finance_note = request.form.get("finance_note", "").strip()
+        record.finance_adjustments = float(form.finance_adjustments.data or 0)
+        record.finance_note = (form.finance_note.data or "").strip()
 
         # Handle invoice upload
         file = request.files.get("finance_invoice_file")
         if file and file.filename:
+            content_type = (file.mimetype or "").lower()
+            if not (content_type.startswith("image/") or content_type == "application/pdf"):
+                flash("❌ Invalid file content. Only images or PDF are accepted.", "danger")
+                return redirect(url_for("finance.dashboard_finance"))
+
+            max_len = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
+            file.stream.seek(0, os.SEEK_END)
+            size = file.stream.tell()
+            file.stream.seek(0)
+            if size > max_len:
+                flash("❌ File too large. Maximum 16 MB.", "danger")
+                return redirect(url_for("finance.dashboard_finance"))
+
             if not allowed_file(file.filename):
                 flash("❌ Invalid file type.", "danger")
                 return redirect(url_for("finance.dashboard_finance"))
@@ -434,7 +495,7 @@ def clear_offboarding(offboarding_id):
             </html>
             """
 
-            mail.send(msg)
+            safe_send_email(msg, current_app.logger)
 
 
 

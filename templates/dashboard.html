@@ -379,7 +379,7 @@
   </nav>
  
   <div class="container">
-    <div class="page-header">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px;">
       <div>
         <h1 class="page-title">Drivers & Users Management</h1>
         <p class="page-subtitle">Manage drivers (pending & completed), and manage admin users.</p>
@@ -388,6 +388,9 @@
         {% if current_user.role in ["HR", "SuperAdmin"] %}
         <a href="/reports/reports" class="btn btn-secondary">+ Reports</a>
         {% endif %}
+        
+        <button class="btn add" type="button" onclick="openAddModal()">+ Add Driver</button>
+        
         <button class="btn btn-primary" onclick="openAddUserModal()">+ Add User</button>
       </div>
     </div>
@@ -434,6 +437,7 @@
             <div class="search-box">
               <input id="globalSearch" type="text" placeholder="Search drivers by name / iqama / platform..." oninput="globalSearchFilter()">
             </div>
+
             <p class="text-muted">Showing both pending and completed; use tabs to switch.</p>
           </div>
               <!-- Pending drivers -->
@@ -450,6 +454,7 @@
                       <button class="btn edit" onclick="openEditModal('{{ driver.id }}')">Edit</button>
 
                       <form method="POST" action="{{ url_for('admin.delete_driver', driver_id=driver.get('id')) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn delete" onclick="return confirm('Delete this driver?')">Delete</button>
                       </form>
                     </div>
@@ -474,6 +479,7 @@
                         <button class="btn edit" onclick="openEditModal('{{ driver.id }}')">Edit</button>
 
                         <form method="POST" action="{{ url_for('admin.delete_driver', driver_id=driver.id) }}" style="display:inline;">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                           <button type="submit" class="btn delete" onclick="return confirm('Delete this driver?')">Delete</button>
                         </form>
                       </div>
@@ -633,6 +639,7 @@
                     <div style="display:flex;gap:8px;">
                       <button class="btn view" onclick="openUserEditModalFromRow(event,this)">Edit</button>
                       <form method="POST" action="{{ url_for('admin.delete_user', user_id=user.get('id')) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn delete" onclick="return confirm('Delete this user?')">Delete</button>
                       </form>
                     </div>
@@ -810,6 +817,7 @@ function openViewModal(e) {
     </div>
 
     <form id="editForm" method="POST" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="driver_id" id="edit_driver_id">
 
               <div class="grid-2">
@@ -1205,14 +1213,135 @@ function openViewModal(e) {
           </div>
         </div>
 
+        <!-- ========== ADD DRIVER MODAL ========== -->
+        <div id="addModal" class="modal" aria-hidden="true">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2>Add Driver</h2>
+              <button class="close" onclick="closeModal('addModal')">&times;</button>
+            </div>
+
+            <form id="addForm" method="POST" action="{{ url_for('admin.add_driver') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+              <div class="grid-2">
+                <div>
+                  <label>Full Name</label>
+                  <input type="text" name="name" required>
+                </div>
+                <div>
+                  <label>Iqama Number</label>
+                  <input type="text" name="iqaama_number" required>
+                </div>
+                <div>
+                  <label>Iqama Expiry</label>
+                  <input type="date" name="iqaama_expiry">
+                </div>
+                <div>
+                  <label>Nationality</label>
+                  <input type="text" name="nationality">
+                </div>
+                <div>
+                  <label>City</label>
+                  <input type="text" name="city">
+                </div>
+                <div>
+                  <label>Absher Number</label>
+                  <input type="text" name="absher_number">
+                </div>
+                <div>
+                  <label>Previous Sponsor Number</label>
+                  <input type="text" name="previous_sponsor_number">
+                </div>
+                <div>
+                  <label>Saudi Driving License</label>
+                  <select name="saudi_driving_license">
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Issued Mobile Number</label>
+                  <input type="text" name="issued_mobile_number">
+                </div>
+                <div>
+                  <label>Issued Device ID</label>
+                  <input type="text" name="issued_device_id">
+                </div>
+                <div>
+                  <label>Mobile Issued</label>
+                  <select name="mobile_issued">
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Car Details</label>
+                  <input type="text" name="car_details">
+                </div>
+                <div>
+                  <label>Assignment Date</label>
+                  <input type="date" name="assignment_date">
+                </div>
+                <div>
+                  <label>TAMM Authorized</label>
+                  <select name="tamm_authorized">
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Transfer Fee Paid</label>
+                  <select name="transfer_fee_paid">
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Transfer Fee Amount</label>
+                  <input type="text" name="transfer_fee_amount">
+                </div>
+                <div>
+                  <label>Transfer Fee Paid At</label>
+                  <input type="datetime-local" name="transfer_fee_paid_at">
+                </div>
+                <div>
+                  <label>Qiwa Contract Status</label>
+                  <input type="text" name="qiwa_contract_status" placeholder="Pending">
+                </div>
+                <div>
+                  <label>Onboarding Stage</label>
+                  <input type="text" name="onboarding_stage" placeholder="Ops Manager">
+                </div>
+                <div style="grid-column:1/-1;">
+                  <label>Assign Businesses / Platforms</label>
+                  <div id="addBusinessContainer"></div>
+                  <button type="button" id="addBusinessBtnAdd" class="btn secondary" style="margin-top:8px;">+ Add Business</button>
+                </div>
+              </div>
+
+              <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+                <button type="button" class="btn" onclick="closeModal('addModal')">Cancel</button>
+                <button type="submit" class="btn add">Create driver</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+<script id="allBusinessesData" type="application/json">
+  {{ all_businesses | tojson | safe }}
+</script>
+
 <script>
-const allBusinesses = {{ all_businesses | tojson | safe }};
+// Read business list from embedded JSON to keep this script valid before templating
+const allBusinesses = JSON.parse(document.getElementById('allBusinessesData')?.textContent || '[]');
 
 // ----------------------
 // Add / Remove Businesses
 // ----------------------
-function addBusinessRow(selectedBusinessId = '', selectedPlatformId = '') {
-    const container = document.getElementById('businessContainer');
+function addBusinessRow(selectedBusinessId = '', selectedPlatformId = '', containerId = 'businessContainer') {
+  const container = document.getElementById(containerId);
+  if (!container) return;
     const row = document.createElement('div');
     row.style.display = 'flex';
     row.style.gap = '8px';
@@ -1249,18 +1378,18 @@ function addBusinessRow(selectedBusinessId = '', selectedPlatformId = '') {
     selPlatform.appendChild(defaultPlatformOpt);
 
     function populatePlatforms(businessId) {
-        selPlatform.innerHTML = '';
-        selPlatform.appendChild(defaultPlatformOpt.cloneNode(true));
-        const business = allBusinesses.find(b => String(b.id) === String(businessId));
-        if(business && business.available_ids) {
-            business.available_ids.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.id;
-                opt.text = p.value;
-                if(String(p.id) === String(selectedPlatformId)) opt.selected = true;
-                selPlatform.appendChild(opt);
-            });
-        }
+      selPlatform.innerHTML = '';
+      selPlatform.appendChild(defaultPlatformOpt.cloneNode(true));
+      const business = allBusinesses.find(b => String(b.id) === String(businessId));
+      if(business && business.available_ids) {
+        business.available_ids.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.text = p.value;
+          if(String(p.id) === String(selectedPlatformId)) opt.selected = true;
+          selPlatform.appendChild(opt);
+        });
+      }
     }
 
     if(selectedBusinessId) populatePlatforms(selectedBusinessId);
@@ -1281,13 +1410,30 @@ function addBusinessRow(selectedBusinessId = '', selectedPlatformId = '') {
 }
 
 // Add business button
-document.getElementById('addBusinessBtn').addEventListener('click', () => addBusinessRow());
+document.getElementById('addBusinessBtn').addEventListener('click', () => addBusinessRow('', '', 'businessContainer'));
+const addBusinessBtnAdd = document.getElementById('addBusinessBtnAdd');
+if (addBusinessBtnAdd) {
+  addBusinessBtnAdd.addEventListener('click', () => addBusinessRow('', '', 'addBusinessContainer'));
+}
+
+function openAddModal() {
+  const form = document.getElementById('addForm');
+  if (form) {
+    form.reset();
+  }
+  const container = document.getElementById('addBusinessContainer');
+  if (container) {
+    container.innerHTML = '';
+    addBusinessRow('', '', 'addBusinessContainer');
+  }
+  document.getElementById('addModal').classList.add('show');
+}
 
 // ----------------------
 // Open / Populate Modal
 // ----------------------
 function openEditModal(driverId) {
-    fetch(`/dashboard/driver/${driverId}/json`)
+  fetch(`/admin/driver/${driverId}/json`)
         .then(res => res.json())
         .then(d => {
             populateEditForm(d);
@@ -1341,7 +1487,7 @@ function populateEditForm(d) {
     showFile('edit_qiwa_contract_link', d.qiwa_contract_file_url);
 
     // Form action
-    document.getElementById('editForm').action = `/dashboard/driver/${d.id}/update`;
+    document.getElementById('editForm').action = `/admin/driver/${d.id}/update`;
 }
 
 // Close modal
@@ -1364,6 +1510,7 @@ function closeModal(modalId) {
             </div>
 
             <form id="addUserForm" method="POST" action="{{ url_for('admin.add_user') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <div class="grid-2">
                 <div>
                   <label>Full Name</label>
@@ -1455,6 +1602,7 @@ function closeModal(modalId) {
             </div>
 
             <form id="editUserForm" method="POST">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" id="edit_user_id" name="user_id">
               <div class="grid-2">
                 <div>
@@ -1497,6 +1645,7 @@ function closeModal(modalId) {
               <button class="close" onclick="closeModal('changePasswordModal')">&times;</button>
             </div>
             <form method="POST" action="{{ url_for('admin.change_password') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <div>
                 <label>Current password</label>
                 <input type="password" name="current_password" required>
@@ -1757,6 +1906,7 @@ function closeModal(modalId) {
         </script>
     </div>
   </div>
+{% include 'includes/csrf_auto.html' %}
 </body>
 </html>
   

@@ -2,15 +2,32 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import login_required, current_user
 from datetime import datetime
 from models import Driver, User , Offboarding
-from extensions import db, mail
+from extensions import db, mail, limiter
 from flask_mail import Message
 from werkzeug.security import check_password_hash, generate_password_hash
 from utils.email_utils import send_password_change_email
 from sqlalchemy.orm import aliased
+from flask_wtf.csrf import validate_csrf, CSRFError
+from forms.common import CSRFOnlyForm, ChangePasswordForm, OpsCoordinatorOffboardingForm
 
 
 
 ops_coordinator_bp = Blueprint("ops_coordinator", __name__)
+
+
+def _validate_csrf():
+    """Validate CSRF token from form or X-CSRFToken header."""
+    header_token = request.headers.get("X-CSRFToken")
+    if header_token:
+        try:
+            validate_csrf(header_token)
+            return True
+        except CSRFError as exc:
+            current_app.logger.warning("[OPS_COORDINATOR] Header CSRF failed: %s", exc)
+            return False
+
+    form = CSRFOnlyForm()
+    return form.validate_on_submit()
 
 # -------------------------
 # Dashboard - Ops Coordinator
@@ -47,11 +64,17 @@ def dashboard_ops_coordinator():
 # Initiate Offboarding Request
 # -------------------------
 @ops_coordinator_bp.route("/initiate_offboarding/<int:driver_id>", methods=["POST"])
+@limiter.limit("20 per minute")
 @login_required
 def initiate_offboarding(driver_id):
     if current_user.role != "OpsCoordinator":
         flash("Access denied. Ops Coordinator role required.", "danger")
         return redirect(url_for("auth.login"))
+
+    form = OpsCoordinatorOffboardingForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
+        return redirect(url_for("ops_coordinator.dashboard_ops_coordinator"))
 
     driver = Driver.query.get_or_404(driver_id)
 
@@ -63,7 +86,7 @@ def initiate_offboarding(driver_id):
         flash(f"Offboarding already requested for {driver.name}.", "info")
         return redirect(url_for("ops_coordinator.dashboard_ops_coordinator"))
 
-    reason = request.form.get("reason", "").strip()
+    reason = (form.reason.data or "").strip()
 
     # Update driver record
     driver.offboard_request = True
@@ -179,21 +202,22 @@ def initiate_offboarding(driver_id):
 # Change Password
 # -------------------------
 @ops_coordinator_bp.route("/change_password", methods=["POST"])
+@limiter.limit("5 per minute")
 @login_required
 def change_password():
     if current_user.role != "OpsCoordinator":
         flash("Access denied. Ops Coordinator role required.", "danger")
         return redirect(url_for("auth.login"))
 
-    current_password = request.form.get("current_password", "")
-    new_password = request.form.get("new_password", "")
-    confirm_password = request.form.get("confirm_password", "")
-
-    if not current_password or not new_password or not confirm_password:
-        flash("Please fill all password fields.", "danger")
+    form = ChangePasswordForm()
+    if not form.validate_on_submit():
+        flash("Invalid or missing CSRF token. Please try again.", "danger")
         return redirect(url_for("ops_coordinator.dashboard_ops_coordinator"))
 
-    if not check_password_hash(current_user.password, current_password):
+    new_password = form.new_password.data
+    confirm_password = form.confirm_password.data
+
+    if not check_password_hash(current_user.password, form.current_password.data):
         flash("Current password is incorrect.", "danger")
         return redirect(url_for("ops_coordinator.dashboard_ops_coordinator"))
 

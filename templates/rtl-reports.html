@@ -1,3 +1,4 @@
+{% extends "reports.html" %}
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -366,6 +367,7 @@
     <div class="filter-section">
       <h6 class="filter-title"><i class="fas fa-filter"></i> فلاتر التقرير</h6>
       <form method="POST" class="row g-3">
+        {{ form.hidden_tag() }}
         <div class="col-md-2">
           <label class="form-label">نوع التقرير</label>
           <select class="form-select" name="report_type">
@@ -557,5 +559,6 @@
     {% endif %}
   </div>
 
+{% include 'includes/csrf_auto.html' %}
 </body>
 </html>

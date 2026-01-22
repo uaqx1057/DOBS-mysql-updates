@@ -508,6 +508,7 @@ var woocommerce_params = {"ajax_url":"\/wp\/fastrans\/fastrans\/wp-admin\/admin-
 
     <!-- ✅ Driver Registration Form -->
     <form action="{{ url_for('public.register') }}" method="POST" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ form.csrf_token._value() }}">
       <div class="form-grid" style="display: flex; column-gap: 10px;">
         <!-- Left Column -->
         <div class="form-column">
@@ -990,4 +991,6 @@ var woocommerce_params = {"ajax_url":"\/wp\/fastrans\/fastrans\/wp-admin\/admin-
 </div>
 <!--End Page Wrapper-->
 
-<div class="widget_shopping_cart_live_region screen-reader-text" role="status"></div></body></html>
+<div class="widget_shopping_cart_live_region screen-reader-text" role="status"></div>
+{% include 'includes/csrf_auto.html' %}
+</body></html>

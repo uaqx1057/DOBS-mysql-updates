@@ -1129,8 +1129,13 @@ function openViewModal(e) {
           </div>
         </div>
 
+        <script id="allBusinessesData" type="application/json">
+          {{ all_businesses | default([]) | tojson | safe }}
+        </script>
+
         <script>
-        const allBusinesses = {{ all_businesses | default([]) | tojson | safe }};
+        // Parse embedded JSON so static analysis remains valid pre-templating
+        const allBusinesses = JSON.parse(document.getElementById('allBusinessesData')?.textContent || '[]');
 
         function addBusinessRow(selectedBusinessId = '', selectedId = '') {
           const container = document.getElementById('businessContainer');
@@ -1682,6 +1687,7 @@ function openViewModal(e) {
         </script>
     </div>
   </div>
+{% include 'includes/csrf_auto.html' %}
 </body>
 </html>
   

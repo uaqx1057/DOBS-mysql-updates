@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, send_file
+from flask import Blueprint, render_template, request, send_file, flash
 from datetime import datetime
 from io import BytesIO
 import csv
@@ -12,6 +12,7 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from io import StringIO
 from flask import Response
+from forms.common import ReportsFilterForm
 
 
 reports_bp = Blueprint("reports_bp", __name__, template_folder="templates")
@@ -75,6 +76,7 @@ def get_filtered_drivers(report_type=None, start_date=None, end_date=None, city=
 @login_required
 @roles_required("SuperAdmin", "HR")
 def reports():
+    form = ReportsFilterForm()
     drivers = None
     report_type = start_date = end_date = city = transfer_status = None
 
@@ -111,12 +113,15 @@ def reports():
     pending_finance = Driver.query.filter(Driver.onboarding_stage == 'Finance').count()
 
     if request.method == "POST":
-        report_type = request.form.get("report_type")
-        start_date = request.form.get("start_date")
-        end_date = request.form.get("end_date")
-        city = request.form.get("city")
-        transfer_status = request.form.get("transfer_status")
-        drivers = get_filtered_drivers(report_type, start_date, end_date, city, transfer_status)
+        if not form.validate_on_submit():
+            flash("Invalid filter submission.", "danger")
+        else:
+            report_type = form.report_type.data
+            start_date = form.start_date.data.strftime("%Y-%m-%d") if form.start_date.data else None
+            end_date = form.end_date.data.strftime("%Y-%m-%d") if form.end_date.data else None
+            city = form.city.data
+            transfer_status = form.transfer_status.data
+            drivers = get_filtered_drivers(report_type, start_date, end_date, city, transfer_status)
 
     return render_template(
         "reports.html",
@@ -138,7 +143,8 @@ def reports():
         end_date=end_date,
         city=city,
         transfer_status=transfer_status,
-        saudi_cities=SAUDI_CITIES
+        saudi_cities=SAUDI_CITIES,
+        form=form
     )
 
 

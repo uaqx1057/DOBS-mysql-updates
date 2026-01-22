@@ -6,7 +6,7 @@ from werkzeug.security import check_password_hash
 
 from forms.auth import LoginForm
 from models import User  # dob_user model
-from extensions import db, login_manager
+from extensions import db, login_manager, limiter
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -16,6 +16,7 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 @auth_bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute")
 def login():
     form = LoginForm()
     if form.validate_on_submit():

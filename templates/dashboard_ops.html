@@ -250,6 +250,7 @@
         <button class="close" onclick="closeDriverModal()">&times;</button>
       </div>
       <form id="driverForm" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="grid">
           <div>
             <label>Full name</label><div class="value" id="d_name">—</div>
@@ -309,6 +310,7 @@
             {% if driver.records|length == 0 %}
               <!-- Show buttons if no offboarding started -->
               <form action="{{ url_for('ops_manager.request_offboarding', driver_id=driver.id) }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn view">Request Offboarding</button>
               </form>
               <button class="btn danger reject-offboarding-btn" data-driver-id="{{ driver.id }}" style="flex:1; background:red;">
@@ -353,6 +355,11 @@
             const form = document.createElement("form");
             form.method = "POST";
             form.action = `/dashboard/ops/reject_offboarding/${driverId}`;
+            const csrfInput = document.createElement("input");
+            csrfInput.type = "hidden";
+            csrfInput.name = "csrf_token";
+            csrfInput.value = "{{ csrf_token() }}";
+            form.appendChild(csrfInput);
             if (reason) {
               const input = document.createElement("input");
               input.type = "hidden";
@@ -728,6 +735,7 @@
       </div>
     </div>
   
+{% include 'includes/csrf_auto.html' %}
 </body>
 </html>
 <!DOCTYPE html>

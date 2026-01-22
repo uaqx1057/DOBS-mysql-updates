@@ -95,13 +95,14 @@
                     {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
     <div class="flash-messages" style="margin-bottom: 15px;">
+                    <style>
+                      .flash-messages .alert-success { background:#d4edda; color:#155724; }
+                      .flash-messages .alert-danger  { background:#f8d7da; color:#721c24; }
+                      .flash-messages .alert-info    { background:#d1ecf1; color:#0c5460; }
+                    </style>
       {% for category, message in messages %}
         <div class="alert alert-{{ category }}" 
-             style="padding: 10px; border-radius: 5px; margin-bottom: 8px;
-                    {% if category == 'success' %}background:#d4edda;color:#155724;
-                    {% elif category == 'danger' %}background:#f8d7da;color:#721c24;
-                    {% elif category == 'info' %}background:#d1ecf1;color:#0c5460;
-                    {% endif %}">
+                           style="padding: 10px; border-radius: 5px; margin-bottom: 8px;">
           {{ message }}
         </div>
       {% endfor %}
@@ -122,6 +123,7 @@
                     <div class="alert alert-warning">Offboarding already requested.</div>
                   {% else %}
                     <form method="POST" action="{{ url_for('ops_coordinator.initiate_offboarding', driver_id=driver.id) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                       <div class="mb-2">
                         <label for="reason-{{ driver.id }}" class="form-label">Reason for Offboarding</label>
                         <input type="text" class="form-control" id="reason-{{ driver.id }}" name="reason" placeholder="Enter reason" required>
@@ -163,6 +165,7 @@
       });
     }
   </script>
+{% include 'includes/csrf_auto.html' %}
 </body>
 </html>
 

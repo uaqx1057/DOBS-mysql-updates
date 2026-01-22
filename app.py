@@ -1,11 +1,14 @@
 import sys
 import os
+import time
+from sqlalchemy import event
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, send_from_directory, session, redirect, url_for, request, make_response, g
+from flask_limiter.errors import RateLimitExceeded
 from config import Config
-from extensions import db, mail, login_manager, migrate, csrf, babel
+from extensions import db, mail, login_manager, migrate, csrf, babel, limiter
 # Ensure models are registered with SQLAlchemy metadata for migrations
 import models  # noqa: F401
 
@@ -43,6 +46,39 @@ def create_app():
     migrate.init_app(app, db)
     csrf.init_app(app)
 
+    # Configure rate limiting from config/env for flexibility
+    default_limits_raw = app.config.get("RATELIMIT_DEFAULTS")
+    if default_limits_raw:
+        app.config["RATELIMIT_DEFAULT"] = default_limits_raw
+    storage_uri = app.config.get("RATELIMIT_STORAGE_URI")
+    if storage_uri:
+        app.config["RATELIMIT_STORAGE_URI"] = storage_uri
+    limiter.init_app(app)
+
+    # --- Slow query logging ---
+    slow_threshold_ms = app.config.get("SLOW_QUERY_MS", 500)
+
+    def _setup_query_timing():
+        with app.app_context():
+            engine = db.get_engine()
+
+            @event.listens_for(engine, "before_cursor_execute")
+            def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+                context._query_start_time = time.perf_counter()
+
+            @event.listens_for(engine, "after_cursor_execute")
+            def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+                start = getattr(context, "_query_start_time", None)
+                if start is None:
+                    return
+                duration_ms = int((time.perf_counter() - start) * 1000)
+                if duration_ms >= slow_threshold_ms:
+                    app.logger.warning(
+                        "[SLOW QUERY] %sms %s params=%s", duration_ms, statement.strip().split("\n")[0][:200], parameters
+                    )
+
+    _setup_query_timing()
+
     # --- Localization (Babel) ---
     def select_locale():
         return session.get("lang") or request.accept_languages.best_match(app.config["LANGUAGES"]) or "en"
@@ -76,11 +112,29 @@ def create_app():
     # --- Default language before request ---
     @app.before_request
     def set_default_lang():
+        g.request_started_at = time.perf_counter()
         if "lang" not in session:
             preferred = request.accept_languages.best_match(["en", "ar"])
             session["lang"] = preferred or "en"
         g.current_lang = session.get("lang", "en")
         g.text_direction = "rtl" if g.current_lang == "ar" else "ltr"
+
+    @app.after_request
+    def add_timing_header(response):
+        started = getattr(g, "request_started_at", None)
+        if started is not None:
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            response.headers["X-Request-Duration-ms"] = str(duration_ms)
+        return response
+
+    @app.errorhandler(RateLimitExceeded)
+    def handle_ratelimit(exc):
+        app.logger.warning(
+            "Rate limit exceeded", extra={"path": request.path, "ip": request.remote_addr, "endpoint": request.endpoint}
+        )
+        if request.accept_mimetypes.best == "application/json":
+            return {"message": "Too many requests. Please slow down."}, 429
+        return "Too many requests. Please slow down.", 429
 
     @app.context_processor
     def inject_lang():

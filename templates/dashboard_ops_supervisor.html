@@ -162,6 +162,8 @@
     <div id="driverInfoArea"></div>
 
     <form id="approveForm" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="platform_ids_csv" id="platform_ids_csv">
       <h4>Assign Businesses / Platforms</h4>
       <div id="businessContainer"></div>
       <button type="button" id="addBusinessBtn" class="btn secondary" style="margin-top:8px;">+ Add business</button>
@@ -186,8 +188,12 @@
 
 
 
+<script id="allBusinessesData" type="application/json">
+  {{ all_businesses | tojson | safe }}
+</script>
+
 <script>
-const allBusinesses = {{ all_businesses | tojson | safe }};
+const allBusinesses = JSON.parse(document.getElementById('allBusinessesData')?.textContent || '[]');
 
 function addBusinessRow(selectedBusinessId = '', selectedId = '') {
   const container = document.getElementById('businessContainer');
@@ -451,13 +457,14 @@ document.getElementById('addBusinessBtn').addEventListener('click', () => addBus
     // Approve form submit: ensure at least one business selected
   // Approve form submit: ensure at least one platform_id is chosen
   document.getElementById('approveForm').addEventListener('submit', function(evt){
-    const selects = Array.from(this.querySelectorAll('select[name="platform_id[]"]')); // <- correct name
-    const ok = selects.some(s => s.value && s.value !== '');
-    if(!ok){
+    const selects = Array.from(this.querySelectorAll('select[name="platform_id[]"]'));
+    const ids = selects.map(s => s.value).filter(Boolean);
+    if(ids.length === 0){
       alert('Please choose at least one business (and its ID).');
       evt.preventDefault();
       return false;
     }
+    document.getElementById('platform_ids_csv').value = ids.join(',');
     // normal submit — server route will handle saving DriverBusiness etc.
   });
 
@@ -537,5 +544,6 @@ document.getElementById('addBusinessBtn').addEventListener('click', () => addBus
     function openPasswordModal(){ document.getElementById('passwordModal').classList.add('show'); }
     function closePasswordModal(){ document.getElementById('passwordModal').classList.remove('show'); }
   </script>
+{% include 'includes/csrf_auto.html' %}
 </body>
 </html>

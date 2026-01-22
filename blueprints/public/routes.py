@@ -1,12 +1,13 @@
 import os
 import re
 from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, session, send_from_directory, make_response
-from extensions import db, mail
+from extensions import db, mail, limiter
 from models import Driver, User
 from flask_mail import Message
 from werkzeug.utils import secure_filename
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
+from forms.common import PublicRegisterForm
 
 public_bp = Blueprint("public", __name__)
 
@@ -60,44 +61,28 @@ def serve_page(page_name):
 # Driver registration
 # ------------------------
 @public_bp.route("/register", methods=["GET", "POST"])
+@limiter.limit("5 per minute")
 def register():
-    if request.method == "POST":
-        # -----------------------------
-        # Fetch form data
-        # -----------------------------
-        name = request.form.get("name")
-        iqaama_number = request.form.get("iqaama_number")
-        absher_number = request.form.get("absher_number")
-        iqaama_expiry_str = request.form.get("iqaama_expiry_date")  # string from form
+    form = PublicRegisterForm()
 
-        # Validate English inputs
+    if form.validate_on_submit():
+        name = form.name.data
+        iqaama_number = form.iqaama_number.data
+        absher_number = form.absher_number.data
+
         if not validate_english(name, "Name") or not validate_english(iqaama_number, "Iqama Number") or not validate_english(absher_number, "Absher Number"):
             return redirect(url_for("public.register"))
 
-        # Convert to date object
-        iqaama_expiry = None
-        if iqaama_expiry_str:
-            try:
-                iqaama_expiry = datetime.strptime(iqaama_expiry_str, "%Y-%m-%d").date()
-            except ValueError:
-                flash("❌ Invalid Iqama expiry date format.", "danger")
-                return redirect(url_for("public.register"))
+        iqaama_expiry = form.iqaama_expiry_date.data
+        saudi_driving_license = form.saudi_driving_license.data == "yes"
+        nationality = form.nationality.data
+        city = form.city.data
+        previous_sponsor_number = form.previous_sponsor_number.data
+        iqama_card_upload = form.iqama_card_upload.data
 
-        saudi_driving_license = request.form.get("saudi_driving_license") == "yes"
-        nationality = request.form.get("nationality")
-        city = request.form.get("city")
-        previous_sponsor_number = request.form.get("previous_sponsor_number")
-        iqama_card_upload = request.files.get("iqama_card_upload")
-
-        # -----------------------------
-        # Handle file upload (mandatory, size and MIME checked)
-        # -----------------------------
+        # File validation (size + MIME)
         if not iqama_card_upload or not iqama_card_upload.filename:
             flash("❌ Iqama card upload is required.", "danger")
-            return redirect(url_for("public.register"))
-
-        if not allowed_file(iqama_card_upload.filename):
-            flash("❌ Invalid file type. Allowed: png, jpg, jpeg, gif, pdf.", "danger")
             return redirect(url_for("public.register"))
 
         content_type = (iqama_card_upload.mimetype or "").lower()
@@ -105,7 +90,6 @@ def register():
             flash("❌ Invalid file content. Only images or PDF are accepted.", "danger")
             return redirect(url_for("public.register"))
 
-        # Size check using MAX_CONTENT_LENGTH fallback 16MB
         max_len = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
         iqama_card_upload.stream.seek(0, os.SEEK_END)
         file_size = iqama_card_upload.stream.tell()
@@ -115,16 +99,11 @@ def register():
             return redirect(url_for("public.register"))
 
         upload_folder = UPLOAD_FOLDER
-
-        # Create safe filename and save inside configured uploads directory
         safe_name = f"{name.replace(' ', '_').lower()}_{iqaama_number}"
         ext = iqama_card_upload.filename.rsplit(".", 1)[1].lower()
         file_name = secure_filename(f"{safe_name}.{ext}")
         iqama_card_upload.save(os.path.join(upload_folder, file_name))
 
-        # -----------------------------
-        # Create new driver
-        # -----------------------------
         new_driver = Driver(
             name=name,
             iqaama_number=iqaama_number,
@@ -136,7 +115,7 @@ def register():
             previous_sponsor_number=previous_sponsor_number,
             iqama_card_upload=file_name,
             onboarding_stage="Ops Manager",
-            driver_type_id=1  # <-- default Sponsor
+            driver_type_id=1,
         )
 
         db.session.add(new_driver)
@@ -150,11 +129,8 @@ def register():
                 flash("⚠️ Unexpected error occurred. Try again.", "danger")
             return redirect(url_for("public.register"))
 
-        # -----------------------------
-        # Notify relevant users via email
-        # -----------------------------
         try:
-            recipients = [u.email for u in User.query.filter(User.role.in_(["OpsManager"])).all()]
+            recipients = [u.email for u in User.query.filter(User.role.in_(["OpsManager"])).all() if u.email]
             if recipients:
                 msg = Message(
                     subject="New Driver Registration Submitted | تسجيل سائق جديد",
@@ -204,14 +180,16 @@ def register():
                 mail.send(msg)
 
         except Exception as e:
-            print(f"Error sending email: {e}")
+            current_app.logger.exception("Public registration email failed")
 
         flash("✅ Driver data received successfully!", "success")
         return redirect(url_for("public.register"))
 
-    # Render template with RTL support
+    if request.method == "POST":
+        flash("Please fix the highlighted errors and try again.", "danger")
+
     template = "rtl_register.html" if session.get("lang") == "ar" else "register.html"
-    return render_template(template)
+    return render_template(template, form=form)
 
 
 # ------------------------

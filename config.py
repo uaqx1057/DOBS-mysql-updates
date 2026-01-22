@@ -41,6 +41,13 @@ class Config:
         os.getenv("MAIL_DEFAULT_ADDRESS", "noreply@example.com"),
     )
 
+    # Rate limiting
+    RATELIMIT_DEFAULTS = os.getenv("RATELIMIT_DEFAULTS", "200 per hour;50 per minute")
+    RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI")
+
+    # Observability
+    SLOW_QUERY_MS = int(os.getenv("SLOW_QUERY_MS", "500"))
+
     # Localization
     LANGUAGES = ["en", "ar"]
     BABEL_DEFAULT_LOCALE = os.getenv("BABEL_DEFAULT_LOCALE", "en")
