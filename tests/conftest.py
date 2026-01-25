@@ -9,10 +9,12 @@ from models import User
 
 
 @pytest.fixture(scope="session")
-def app():
+def app(tmp_path_factory):
     # Isolate tests to an in-memory DB and disable CSRF for simple client tests
     os.environ.setdefault("DATABASE_URI", "sqlite:///:memory:")
     os.environ.setdefault("WTF_CSRF_ENABLED", "false")
+    upload_dir = tmp_path_factory.mktemp("uploads")
+    os.environ.setdefault("UPLOAD_FOLDER", str(upload_dir))
     test_app = create_app()
     test_app.config.update(TESTING=True)
 
