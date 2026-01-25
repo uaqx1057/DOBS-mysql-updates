@@ -65,7 +65,6 @@
     .container-main {
       max-width: 1400px;
       margin: 0 auto;
-      padding: 0 24px 40px;
     }
 
     .filter-section {
@@ -126,7 +125,7 @@
 
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 20px;
       margin-bottom: 28px;
     }
@@ -141,6 +140,9 @@
       position: relative;
       overflow: hidden;
     }
+
+    .stat-card.clickable { cursor: pointer; }
+    .stat-sub { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
 
     .stat-card::before {
       content: '';
@@ -332,6 +334,32 @@
       margin-bottom: 16px;
     }
 
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .lang-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      background: rgba(255, 255, 255, 0.14);
+      transition: background 0.2s ease, border 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .lang-switch:hover {
+      background: rgba(255, 255, 255, 0.22);
+    }
+
     @media (max-width: 768px) {
       .stats-grid {
         grid-template-columns: repeat(2, 1fr);
@@ -353,12 +381,18 @@
 
   <!-- Page Header -->
   <div class="page-header">
-    <div class="container-main">
-      <h1 class="page-title">
-        <i class="fas fa-chart-bar"></i>
-        تقارير السائقين
-      </h1>
-      <p class="page-subtitle">تقارير وتحليلات شاملة لإدارة السائقين</p>
+    <div class="container-main header-top">
+      <div>
+        <h1 class="page-title">
+          <i class="fas fa-chart-bar"></i>
+          تقارير السائقين
+        </h1>
+        <p class="page-subtitle">تقارير وتحليلات شاملة لإدارة السائقين</p>
+      </div>
+      <div>
+        {% set next_lang = 'en' %}
+        <a class="lang-switch" href="{{ url_for('public.set_language', lang=next_lang, next=request.full_path) }}">English</a>
+      </div>
     </div>
   </div>
 
@@ -371,11 +405,17 @@
         <div class="col-md-2">
           <label class="form-label">نوع التقرير</label>
           <select class="form-select" name="report_type">
+        <option value="all" {% if report_type=='all' or not report_type %}selected{% endif %}>كل السائقين</option>
         <option value="onboarding" {% if report_type=='onboarding' %}selected{% endif %}>المكتملون</option>
         <option value="pending_onboarding" {% if report_type=='pending_onboarding' %}selected{% endif %}>قيد الإكمال</option>
         <option value="offboarding" {% if report_type=='offboarding' %}selected{% endif %}>إخلاء مكتمل</option>
         <option value="pending_offboarding" {% if report_type=='pending_offboarding' %}selected{% endif %}>إخلاء قيد الإنجاز</option>
           <option value="rejected" {% if report_type=='rejected' %}selected{% endif %}>مرفوضون</option>
+        <option value="pending_ops_manager_all" {% if report_type=='pending_ops_manager_all' %}selected{% endif %} hidden>المعلق لدى مدير العمليات (الكل)</option>
+        <option value="pending_hr_all" {% if report_type=='pending_hr_all' %}selected{% endif %} hidden>المعلق لدى الموارد البشرية (الكل)</option>
+        <option value="pending_ops_supervisor_all" {% if report_type=='pending_ops_supervisor_all' %}selected{% endif %} hidden>المعلق لدى مشرف العمليات (الكل)</option>
+        <option value="pending_fleet_manager_all" {% if report_type=='pending_fleet_manager_all' %}selected{% endif %} hidden>المعلق لدى مدير الأسطول (الكل)</option>
+        <option value="pending_finance_all" {% if report_type=='pending_finance_all' %}selected{% endif %} hidden>المعلق لدى المالية (الكل)</option>
           </select>
         </div>
         <div class="col-md-2">
@@ -412,27 +452,27 @@
 
     <!-- Summary Cards -->
     <div class="stats-grid">
-      <div class="stat-card primary">
+      <div class="stat-card primary clickable" data-report-type="all">
         <div class="stat-label"><i class="fas fa-users"></i> إجمالي السائقين</div>
         <div class="stat-value">{{ total_drivers }}</div>
       </div>
-      <div class="stat-card success">
+      <div class="stat-card success clickable" data-report-type="onboarding">
         <div class="stat-label"><i class="fas fa-check-circle"></i> مكتمل</div>
         <div class="stat-value">{{ completed_onboarded }}</div>
       </div>
-      <div class="stat-card warning">
+      <div class="stat-card warning clickable" data-report-type="pending_onboarding">
         <div class="stat-label"><i class="fas fa-clock"></i> قيد الإكمال</div>
         <div class="stat-value">{{ pending_onboarded }}</div>
       </div>
-      <div class="stat-card info">
+      <div class="stat-card info clickable" data-report-type="offboarding">
         <div class="stat-label"><i class="fas fa-user-check"></i> إخلاء مكتمل</div>
         <div class="stat-value">{{ completed_offboarded }}</div>
       </div>
-      <div class="stat-card warning">
+      <div class="stat-card warning clickable" data-report-type="pending_offboarding">
         <div class="stat-label"><i class="fas fa-hourglass-half"></i> إخلاء قيد الإنجاز</div>
         <div class="stat-value">{{ pending_offboarded }}</div>
       </div>
-      <div class="stat-card danger">
+      <div class="stat-card danger clickable" data-report-type="rejected">
         <div class="stat-label"><i class="fas fa-times-circle"></i> مرفوضون</div>
         <div class="stat-value">{{ rejected_drivers }}</div>
       </div>
@@ -456,32 +496,40 @@
         <div class="stat-label"><i class="fas fa-user-cog"></i> قيد اعتماد مشرف العمليات</div>
         <div class="stat-value">{{ pending_ops_supervisor }}</div>
       </div>
-      <div class="stat-card info">
-        <div class="stat-label"><i class="fas fa-car"></i> قيد اعتماد مدير الأسطول</div>
-        <div class="stat-value">{{ pending_fleet_manager }}</div>
+      <div class="stats-grid">
+        <div class="stat-card secondary">
+          <div class="stat-label"><i class="fas fa-calendar-alt"></i> التحويلات الشهرية</div>
+          <div class="stat-value">{{ monthly_transfers_completed }}</div>
+        </div>
       </div>
-      <div class="stat-card danger">
-        <div class="stat-label"><i class="fas fa-dollar-sign"></i> قيد اعتماد المالية</div>
-        <div class="stat-value">{{ pending_finance }}</div>
-      </div>
-    </div>
 
-    <!-- Export Buttons -->
-    <div class="export-section">
-      <h6 class="export-title"><i class="fas fa-download"></i> تصدير التقرير</h6>
-      <div class="export-buttons">
-        <a href="{{ url_for('reports_bp.export_csv', report_type=report_type, start_date=start_date, end_date=end_date, city=city, transfer_status=transfer_status) }}" class="btn-export btn-csv">
-          <i class="fas fa-file-csv"></i> تصدير CSV
-        </a>
-        <a href="{{ url_for('reports_bp.export_pdf', report_type=report_type, start_date=start_date, end_date=end_date, city=city, transfer_status=transfer_status) }}" class="btn-export btn-pdf">
-          <i class="fas fa-file-pdf"></i> تصدير PDF
-        </a>
+      <div class="stats-grid">
+        <div class="stat-card primary clickable" data-report-type="pending_ops_manager_all">
+          <div class="stat-label"><i class="fas fa-user-tie"></i> المعلق لدى مدير العمليات</div>
+          <div class="stat-value">{{ pending_ops_manager_on + pending_ops_manager_off }}</div>
+          <div class="stat-sub">توظيف: {{ pending_ops_manager_on }} &nbsp;|&nbsp; إنهاء: {{ pending_ops_manager_off }}</div>
+        </div>
+        <div class="stat-card success clickable" data-report-type="pending_hr_all">
+          <div class="stat-label"><i class="fas fa-user-friends"></i> المعلق لدى الموارد البشرية</div>
+          <div class="stat-value">{{ pending_hr_on + pending_hr_off }}</div>
+          <div class="stat-sub">توظيف: {{ pending_hr_on }} &nbsp;|&nbsp; إنهاء: {{ pending_hr_off }}</div>
+        </div>
+        <div class="stat-card warning clickable" data-report-type="pending_ops_supervisor_all">
+          <div class="stat-label"><i class="fas fa-user-cog"></i> المعلق لدى مشرف العمليات</div>
+          <div class="stat-value">{{ pending_ops_supervisor_on + pending_ops_supervisor_off }}</div>
+          <div class="stat-sub">توظيف: {{ pending_ops_supervisor_on }} &nbsp;|&nbsp; إنهاء: {{ pending_ops_supervisor_off }}</div>
+        </div>
+        <div class="stat-card info clickable" data-report-type="pending_fleet_manager_all">
+          <div class="stat-label"><i class="fas fa-car"></i> المعلق لدى مدير الأسطول</div>
+          <div class="stat-value">{{ pending_fleet_manager_on + pending_fleet_manager_off }}</div>
+          <div class="stat-sub">توظيف: {{ pending_fleet_manager_on }} &nbsp;|&nbsp; إنهاء: {{ pending_fleet_manager_off }}</div>
+        </div>
+        <div class="stat-card danger clickable" data-report-type="pending_finance_all">
+          <div class="stat-label"><i class="fas fa-dollar-sign"></i> المعلق لدى المالية</div>
+          <div class="stat-value">{{ pending_finance_on + pending_finance_off }}</div>
+          <div class="stat-sub">توظيف: {{ pending_finance_on }} &nbsp;|&nbsp; إنهاء: {{ pending_finance_off }}</div>
+        </div>
       </div>
-    </div>
-
-    <!-- Drivers Table -->
-    {% if drivers %}
-    <div class="table-card">
       <div class="table-header">
         <h5><i class="fas fa-table"></i> سجلات السائقين ({{ drivers|length }} سجل)</h5>
       </div>
@@ -507,13 +555,30 @@
           <td>{{ d.iqaama_number }}</td>
           <td>{{ d.city }}</td>
           <td>
-            {% if d.platforms %}
-              {% for p in d.platforms %}
-                {{ p.platform_name }}{% if not loop.last %}، {% endif %}
+            {% set platform_label = d.platform_display if d.platform_display is defined else "" %}
+            {% if not platform_label %}
+              {% set ns = namespace(items=[]) %}
+              {% for link in d.business_links or [] %}
+                {% set b_obj = link.business_id_obj %}
+                {% if b_obj %}
+                  {% set biz_name = b_obj.business.name if b_obj.business else None %}
+                  {% set id_value = b_obj.value %}
+                  {% set part = biz_name and id_value and (biz_name ~ ' (' ~ id_value ~ ')') or (id_value or biz_name) %}
+                  {% if part %}{% set _ = ns.items.append(part) %}{% endif %}
+                {% endif %}
               {% endfor %}
-            {% else %}
-              —
+              {% set platform_label = ns.items|join(', ') %}
             {% endif %}
+            {% if not platform_label %}
+              {% if d.platform and d.platform_id %}
+                {% set platform_label = d.platform ~ ' (' ~ d.platform_id ~ ')' %}
+              {% elif d.platform %}
+                {% set platform_label = d.platform %}
+              {% elif d.platform_id %}
+                {% set platform_label = d.platform_id %}
+              {% endif %}
+            {% endif %}
+            {{ platform_label or '—' }}
           </td>
           <td>{{ d.assignment_date.strftime("%Y-%m-%d") if d.assignment_date else "" }}</td>
           <td>
@@ -558,6 +623,28 @@
     </div>
     {% endif %}
   </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const form = document.querySelector('.filter-section form');
+      if (!form) return;
+      const reportSelect = form.querySelector('select[name="report_type"]');
+      const cards = document.querySelectorAll('.stat-card.clickable[data-report-type]');
+
+      cards.forEach((card) => {
+        card.addEventListener('click', () => {
+          const target = card.dataset.reportType;
+          if (!target || !reportSelect) return;
+          reportSelect.value = target;
+          if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+          } else {
+            form.submit();
+          }
+        });
+      });
+    });
+  </script>
 
 {% include 'includes/csrf_auto.html' %}
 </body>

@@ -1,6 +1,9 @@
 import sys
 import os
 import time
+import json
+import logging
+import uuid
 from sqlalchemy import event
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -39,6 +42,9 @@ def create_app():
     app.config.from_object(Config)
     app.secret_key = app.config.get("SECRET_KEY", "fallback_secret_key")
 
+    # Ensure upload root exists
+    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+
     # --- Initialize extensions ---
     db.init_app(app)
     mail.init_app(app)
@@ -54,6 +60,21 @@ def create_app():
     if storage_uri:
         app.config["RATELIMIT_STORAGE_URI"] = storage_uri
     limiter.init_app(app)
+
+    # --- Sentry (optional) ---
+    if os.getenv("SENTRY_DSN"):
+        try:
+            import sentry_sdk
+            from sentry_sdk.integrations.flask import FlaskIntegration
+
+            sentry_sdk.init(
+                dsn=os.getenv("SENTRY_DSN"),
+                integrations=[FlaskIntegration()],
+                environment=os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "production",
+                traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            )
+        except Exception:  # pragma: no cover
+            app.logger.exception("Failed to initialize Sentry")
 
     # --- Slow query logging ---
     slow_threshold_ms = app.config.get("SLOW_QUERY_MS", 500)
@@ -85,17 +106,35 @@ def create_app():
 
     babel.init_app(app, locale_selector=select_locale)
 
-    # --- Basic logging setup ---
+    # --- Basic logging setup (structured JSON with request id) ---
+    class RequestIdFilter(logging.Filter):
+        def filter(self, record):
+            record.request_id = getattr(g, "request_id", None)
+            return True
+
+    class JsonFormatter(logging.Formatter):
+        def format(self, record):  # pragma: no cover - formatting only
+            payload = {
+                "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+            }
+            if getattr(record, "request_id", None):
+                payload["request_id"] = record.request_id
+            return json.dumps(payload)
+
     if not app.debug:
-        import logging
         from logging.handlers import RotatingFileHandler
 
         log_path = os.path.join(base_dir, "logs")
         os.makedirs(log_path, exist_ok=True)
-        handler = RotatingFileHandler(os.path.join(log_path, "app.log"), maxBytes=1_000_000, backupCount=5)
+        handler = RotatingFileHandler(os.path.join(log_path, "app.jsonl"), maxBytes=5_000_000, backupCount=5)
         handler.setLevel(logging.INFO)
-        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-        app.logger.addHandler(handler)
+        handler.setFormatter(JsonFormatter())
+        handler.addFilter(RequestIdFilter())
+        app.logger.handlers = [handler]
+        app.logger.setLevel(logging.INFO)
 
     # --- Register blueprints ---
     app.register_blueprint(public_bp)
@@ -113,6 +152,7 @@ def create_app():
     @app.before_request
     def set_default_lang():
         g.request_started_at = time.perf_counter()
+        g.request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         if "lang" not in session:
             preferred = request.accept_languages.best_match(["en", "ar"])
             session["lang"] = preferred or "en"
@@ -125,6 +165,8 @@ def create_app():
         if started is not None:
             duration_ms = int((time.perf_counter() - started) * 1000)
             response.headers["X-Request-Duration-ms"] = str(duration_ms)
+        if getattr(g, "request_id", None):
+            response.headers["X-Request-ID"] = g.request_id
         return response
 
     @app.errorhandler(RateLimitExceeded)
@@ -157,11 +199,22 @@ def create_app():
 
     # --- Set language route ---
     @app.route("/set_language/<lang>")
+    @limiter.limit("30 per minute")
     def set_language(lang):
         if lang in ["en", "ar"]:
             session["lang"] = lang
         next_page = request.args.get("next") or url_for("front_page")
         return redirect(next_page)
+
+    # --- CLI: backfill driver IDs ---
+    @app.cli.command("backfill-driver-ids")
+    def backfill_driver_ids_cmd():
+        """Assign sequential driver_id values for records missing one."""
+
+        from services.admin_service import backfill_driver_ids
+
+        updated = backfill_driver_ids()
+        print(f"Backfilled driver_id for {updated} driver(s)")
 
     return app
 

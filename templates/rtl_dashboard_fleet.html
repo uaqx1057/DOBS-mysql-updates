@@ -136,11 +136,16 @@
     <div id="driverDetails"></div>
 
     <form id="fleetOnboardingForm" method="POST" enctype="multipart/form-data">
-      <label>رقم لوحة السيارة</label>
-      <input type="text" name="vehicle_plate" required>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>المركبات المتاحة</label>
+      <select name="vehicle_id" id="vehicleSelect" required>
+        <option value="">-- اختر مركبة --</option>
+        {% for v in available_vehicles %}
+          <option value="{{ v.id }}" data-make="{{ v.make }}" data-model="{{ v.model }}">{{ v.registration_number }} — {{ v.make }} {{ v.model }}</option>
+        {% endfor %}
+      </select>
 
-      <label>تفاصيل المركبة</label>
-      <input type="text" name="vehicle_details" required>
+      <div id="vehicleMeta" class="muted" style="margin:6px 0 10px 0;"></div>
 
       <label>تاريخ التكليف</label>
       <input type="date" name="assignment_date" required>
@@ -202,6 +207,12 @@ function openOnboardingModal(card) {
     detailsEl.innerHTML = html;
     form.action = `/dashboard/fleet/assign_vehicle/${d.id}`;
 
+    const select = document.getElementById("vehicleSelect");
+    if (select) {
+      select.selectedIndex = 0;
+      if (typeof setVehicleMeta === "function") setVehicleMeta();
+    }
+
     openModal("driverModal");
   } catch (err) {
     console.error("فشل في فتح نافذة الترحيب:", err);
@@ -211,6 +222,25 @@ function openOnboardingModal(card) {
 /* ========= SUBMIT FORM (AJAX) ========= */
 document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("fleetOnboardingForm");
+  const vehicleSelect = document.getElementById("vehicleSelect");
+  const vehicleMeta = document.getElementById("vehicleMeta");
+
+  window.setVehicleMeta = function setVehicleMeta() {
+    if (!vehicleSelect || !vehicleMeta) return;
+    const opt = vehicleSelect.options[vehicleSelect.selectedIndex];
+    if (opt && opt.value) {
+      const make = opt.getAttribute("data-make") || "";
+      const model = opt.getAttribute("data-model") || "";
+      vehicleMeta.textContent = `المركبة المحددة: ${opt.text} (${make} ${model})`;
+    } else {
+      vehicleMeta.textContent = "";
+    }
+  };
+
+  if (vehicleSelect) {
+    vehicleSelect.addEventListener("change", setVehicleMeta);
+    setVehicleMeta();
+  }
   if (!form) return;
 
   form.addEventListener("submit", async function (e) {

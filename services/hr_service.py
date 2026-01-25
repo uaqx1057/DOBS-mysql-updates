@@ -4,10 +4,11 @@ from typing import Dict
 
 from flask_mail import Message
 
-from services.file_storage import is_allowed_file, save_upload, safe_ext_filename
+from services.file_storage import is_allowed_file, save_upload, safe_ext_filename, validate_upload
+from models import QIWA_CONTRACT_STATUSES, TRANSFER_STATUSES
 
 
-def process_hr_approval(driver, files: Dict[str, object], form_data: Dict[str, object], upload_folder: str):
+def process_hr_approval(driver, files: Dict[str, object], form_data: Dict[str, object], upload_folder: str, max_bytes: int):
     """Handle HR approval: save files, update flags and stage."""
     base_name = (driver.name or "driver").replace(" ", "_")
     iqama = driver.iqaama_number or "unknown"
@@ -16,28 +17,32 @@ def process_hr_approval(driver, files: Dict[str, object], form_data: Dict[str, o
     for db_field, file_storage in files.items():
         if file_storage and getattr(file_storage, "filename", None):
             original = file_storage.filename
-            if not is_allowed_file(original):
-                raise ValueError(f"Invalid file type for {db_field}. Only JPG, PNG, PDF allowed.")
+            validate_upload(file_storage, max_bytes)
             filename = safe_ext_filename(prefix, db_field, original)
             save_upload(file_storage, upload_folder, filename)
             setattr(driver, db_field, filename)
 
     driver.qiwa_contract_created = bool(form_data.get("qiwa_contract_created"))
     driver.company_contract_created = bool(form_data.get("company_contract_created"))
-    driver.qiwa_contract_status = form_data.get("qiwa_contract_status", "Pending")
-    driver.sponsorship_transfer_status = form_data.get("sponsorship_transfer_status", "Pending")
+
+    qiwa_status = form_data.get("qiwa_contract_status", "Pending") or "Pending"
+    transfer_status = form_data.get("sponsorship_transfer_status", "Pending") or "Pending"
+    if qiwa_status not in QIWA_CONTRACT_STATUSES:
+        raise ValueError("Invalid qiwa_contract_status")
+    if transfer_status not in TRANSFER_STATUSES:
+        raise ValueError("Invalid sponsorship_transfer_status")
+
+    driver.qiwa_contract_status = qiwa_status
+    driver.sponsorship_transfer_status = transfer_status
 
     driver.hr_approved_at = datetime.utcnow()
     driver.onboarding_stage = "Ops Supervisor"
 
 
-def save_transfer_proof(driver, file_storage, upload_folder: str, status: str):
+def save_transfer_proof(driver, file_storage, upload_folder: str, status: str, max_bytes: int):
     if status != "Transferred":
         raise ValueError("Transfer status must be 'Transferred' when uploading proof.")
-    if not file_storage or not getattr(file_storage, "filename", None):
-        raise ValueError("Transfer proof file is required.")
-    if not is_allowed_file(file_storage.filename):
-        raise ValueError("Invalid file type. Only JPG, PNG, and PDF are allowed.")
+    validate_upload(file_storage, max_bytes)
 
     base_name = (driver.name or "driver").replace(" ", "_")
     iqama = driver.iqaama_number or "unknown"

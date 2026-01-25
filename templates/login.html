@@ -391,7 +391,7 @@ var woocommerce_params = {"ajax_url":"\/wp\/fastrans\/fastrans\/wp-admin\/admin-
                 <div class="tl-thx-banner-text text-center position-relative headline pera-content">
                         <div class="login-container" style="max-width: 500px;margin: 0 auto;">
       <h1>{{ 'Login' if current_lang == 'en' else 'تسجيل الدخول' }}</h1>
-      <form method="POST">
+      <form method="post">
         {{ form.hidden_tag() }}
 
         <label for="username">{{ 'Username:' if current_lang == 'en' else 'اسم المستخدم:' }}</label>
@@ -401,6 +401,12 @@ var woocommerce_params = {"ajax_url":"\/wp\/fastrans\/fastrans\/wp-admin\/admin-
         {{ form.password(class_="form-control", id="password", required=True) }}
 
         {{ form.submit(class_="btn btn-primary w-100", value=('Login' if current_lang == 'en' else 'تسجيل الدخول')) }}
+        {% if session.get('otp_pending') %}
+        <div class="form-group">
+          <label for="code">OTP Code</label>
+          <input type="text" name="code" id="code" class="form-control" maxlength="6" autocomplete="one-time-code" />
+        </div>
+        {% endif %}
       </form>
       {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}

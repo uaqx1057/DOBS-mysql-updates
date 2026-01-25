@@ -1,22 +1,28 @@
 # blueprints/hr/routes.py
-from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
+from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, current_app
 from flask_login import login_required, current_user
 from models import Driver, User, Offboarding
 from extensions import db, mail, csrf
 from services.hr_service import process_hr_approval, save_transfer_proof, send_rejection_email
+from utils.auth import require_roles
 from flask_mail import Message
 from datetime import datetime
 import os
+import sqlalchemy as sa
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 from services.hr_service import process_hr_approval, save_transfer_proof, send_rejection_email
+from sqlalchemy.exc import IntegrityError
 
 hr_bp = Blueprint("hr", __name__, url_prefix='/hr')
 
-UPLOAD_FOLDER = os.path.join(os.getcwd(), "static", "uploads")
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXT = {'.jpg', '.jpeg', '.png', '.pdf'}
-DRIVER_DEFAULT_PASSWORD_HASH = "$2y$12$9GQTuiC.j.XKsmfH.HLvIu0idpQBvIrvQ.rA2IVGs8ufMW1LDQxQm"
+
+
+def _upload_root() -> str:
+    path = current_app.config["UPLOAD_FOLDER"]
+    os.makedirs(path, exist_ok=True)
+    return path
 
 def _allowed_filename(fn):
     _, ext = os.path.splitext(fn.lower())
@@ -64,11 +70,15 @@ def _serialize_driver(d):
 
 
 def _next_driver_code():
-    """Generate next driver code like D0001 based on highest existing value."""
+    """Generate next driver code like D0001 using a locked read to reduce race risk."""
     prefix = "D"
-    last = Driver.query.filter(Driver.driver_id.like(f"{prefix}%"))\
-        .order_by(Driver.driver_id.desc()).first()
-    last_val = last.driver_id if last and last.driver_id else None
+    row = db.session.execute(
+        sa.text(
+            "SELECT driver_id FROM drivers WHERE driver_id LIKE :pref ORDER BY driver_id DESC LIMIT 1 FOR UPDATE"
+        ),
+        {"pref": f"{prefix}%"},
+    ).first()
+    last_val = row[0] if row else None
     try:
         last_num = int(last_val[1:]) if last_val and last_val.startswith(prefix) else 0
     except ValueError:
@@ -76,14 +86,30 @@ def _next_driver_code():
     return f"{prefix}{last_num + 1:04d}"
 
 
-def _ensure_driver_code(driver: Driver):
-    if not driver.driver_id:
-        driver.driver_id = _next_driver_code()
+def _ensure_driver_code(driver: Driver, retries: int = 5):
+    if driver.driver_id:
+        return
+    for attempt in range(1, retries + 1):
+        candidate = _next_driver_code()
+        driver.driver_id = candidate
+        try:
+            with db.session.begin_nested():
+                db.session.flush()
+            return
+        except IntegrityError:
+            db.session.rollback()
+            driver.driver_id = None
+            if attempt == retries:
+                raise ValueError("Could not assign unique driver code after retries")
 
 
 def _ensure_driver_password(driver: Driver):
-    if not driver.password:
-        driver.password = DRIVER_DEFAULT_PASSWORD_HASH
+    if driver.password:
+        return
+
+    # Create a unique, non-shared password hash for the driver
+    random_password = os.urandom(16).hex()
+    driver.password = generate_password_hash(random_password)
 
 def _serialize_offboarding(o):
     return {
@@ -109,10 +135,8 @@ def _serialize_offboarding(o):
 # -------------------------
 @hr_bp.route("/dashboard")
 @login_required
+@require_roles("HR")
 def dashboard_hr():
-    if current_user.role != "HR":
-        flash("Access denied. HR role required.", "danger")
-        return redirect(url_for("auth.login"))
 
     all_drivers = Driver.query.filter(
         Driver.onboarding_stage.in_(["HR", "HR Final", "Completed"])
@@ -160,23 +184,20 @@ def dashboard_hr():
 # -------------------------
 @hr_bp.route("/approve_driver/<int:driver_id>", methods=["POST"])
 @login_required
+@require_roles("HR")
 def approve_driver(driver_id):
-    if current_user.role != "HR":
-        flash("Access denied. HR role required.", "danger")
-        return redirect(url_for("auth.login"))
-
     driver = Driver.query.get_or_404(driver_id)
-
-    files = {
-        "company_contract_file": request.files.get("company_contract"),
-        "promissory_note_file": request.files.get("promissory_note"),
-        "qiwa_contract_file": request.files.get("qiwa_contract"),
-    }
+    files = request.files
+    max_bytes = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
 
     try:
-        process_hr_approval(driver, files, request.form, UPLOAD_FOLDER)
+        process_hr_approval(driver, files, request.form, _upload_root(), max_bytes)
         _ensure_driver_password(driver)
         db.session.commit()
+        current_app.logger.info(
+            "hr_approve_driver",
+            extra={"user": current_user.username, "driver_id": driver.id, "iqama": driver.iqaama_number},
+        )
     except ValueError as ve:
         db.session.rollback()
         flash(str(ve), "danger")
@@ -242,11 +263,8 @@ def approve_driver(driver_id):
 
 @hr_bp.route("/reject_driver/<int:driver_id>", methods=["POST"])
 @login_required
+@require_roles("HR")
 def reject_driver(driver_id):
-    # Only HR can perform this action
-    if current_user.role != "HR":
-        flash("Access denied. HR role required.", "danger")
-        return redirect(url_for("auth.login"))
 
     driver = Driver.query.get_or_404(driver_id)
     reason = request.form.get("rejection_reason", "").strip()
@@ -263,6 +281,10 @@ def reject_driver(driver_id):
         # Delete driver permanently
         db.session.delete(driver)
         db.session.commit()
+        current_app.logger.info(
+            "hr_reject_driver",
+            extra={"user": current_user.username, "driver_id": driver.id, "iqama": driver.iqaama_number, "reason": reason},
+        )
 
         # Collect recipients (Ops, HR, Admin)
         recipients = []
@@ -298,10 +320,8 @@ def reject_driver(driver_id):
 # -------------------------
 @hr_bp.route("/complete_transfer/<int:driver_id>", methods=["POST"])
 @login_required
+@require_roles("HR")
 def complete_sponsorship_transfer(driver_id):
-    if current_user.role != "HR":
-        flash("Access denied", "danger")
-        return redirect(url_for("auth.login"))
 
     driver = Driver.query.get_or_404(driver_id)
 
@@ -322,10 +342,15 @@ def complete_sponsorship_transfer(driver_id):
             transfer_status = request.form.get("sponsorship_transfer_status")
             file = request.files.get("sponsorship_transfer_proof")
             try:
-                save_transfer_proof(driver, file, UPLOAD_FOLDER, transfer_status)
+                max_bytes = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
+                save_transfer_proof(driver, file, _upload_root(), transfer_status, max_bytes)
                 driver.onboarding_stage = "Completed"
                 _ensure_driver_code(driver)
                 db.session.commit()
+                current_app.logger.info(
+                    "hr_complete_transfer",
+                    extra={"user": current_user.username, "driver_id": driver.id, "iqama": driver.iqaama_number},
+                )
                 flash(f"✅ Sponsorship transfer completed for {driver.name}.", "success")
             except ValueError as ve:
                 db.session.rollback()

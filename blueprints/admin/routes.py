@@ -18,11 +18,18 @@ from services.admin_service import (
 )
 from forms.common import CSRFOnlyForm, AddUserForm, AddDriverForm, ChangePasswordForm, EditUserForm
 from sqlalchemy.exc import IntegrityError
+from utils.auth import require_roles_or_owner
+from utils.cache import ttl_cache
 
 # âœ… Blueprint for SuperAdmin/Admin
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 UPLOAD_FOLDER = "static/uploads"
+
+
+@ttl_cache(ttl_seconds=120, maxsize=1)
+def _cached_businesses():
+    return Business.query.order_by(Business.name).all()
 
 # ------------------------- 
 # Language Helper
@@ -39,6 +46,19 @@ def set_lang():
     session["lang"] = lang
     rtl = True if lang == "ar" else False
     return lang, rtl
+
+
+def _pagination_params():
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+    try:
+        per_page = int(request.args.get("per_page", 50))
+    except ValueError:
+        per_page = 50
+    per_page = max(1, min(per_page, 200))
+    return page, per_page
 
 # -------------------------
 # Date helpers
@@ -89,14 +109,30 @@ def dashboard():
     # -------------------------
     # Drivers and Offboarding
     # -------------------------
-    drivers = Driver.query.all()
-    offboarding_records = Offboarding.query.all()
-    
-    offboarded_ids = {o.driver_id for o in offboarding_records if o.status == "Completed"}
-    in_offboarding_ids = {o.driver_id for o in offboarding_records if o.status != "Completed"}
+    page, per_page = _pagination_params()
 
-    pending_offboarding_records = [o for o in offboarding_records if o.status != "Completed"]
-    completed_offboarding_records = [o for o in offboarding_records if o.status == "Completed"]
+    drivers_query = Driver.query.order_by(Driver.id.desc())
+    drivers_total = drivers_query.count()
+    drivers_completed_total = Driver.query.filter(Driver.onboarding_stage == "Completed").count()
+    drivers_pending_total = max(0, drivers_total - drivers_completed_total)
+    drivers = drivers_query.offset((page - 1) * per_page).limit(per_page).all()
+
+    status_pairs = Offboarding.query.with_entities(Offboarding.driver_id, Offboarding.status).all()
+    offboarded_ids = {driver_id for driver_id, status in status_pairs if status == "Completed"}
+    in_offboarding_ids = {driver_id for driver_id, status in status_pairs if status != "Completed"}
+
+    pending_q = (
+        Offboarding.query.filter(Offboarding.status != "Completed")
+        .order_by(Offboarding.updated_at.desc())
+    )
+    completed_q = (
+        Offboarding.query.filter(Offboarding.status == "Completed")
+        .order_by(Offboarding.updated_at.desc())
+    )
+    pending_total = pending_q.count()
+    completed_total = completed_q.count()
+    pending_offboarding_records = pending_q.offset((page - 1) * per_page).limit(per_page).all()
+    completed_offboarding_records = completed_q.offset((page - 1) * per_page).limit(per_page).all()
 
     # -------------------------
     # Helper: serialize drivers
@@ -193,7 +229,7 @@ def dashboard():
     # -------------------------
     # Businesses and available IDs
     # -------------------------
-    businesses = Business.query.order_by(Business.name).all()
+    businesses = _cached_businesses()
     assigned_ids_subq = db.session.query(BusinessDriver.business_id).subquery()
     all_businesses = []
     for b in businesses:
@@ -230,11 +266,13 @@ def dashboard():
         pending_offboarding_drivers=pending_offboarding_driver_dicts,
         completed_offboarding_drivers=completed_offboarding_driver_dicts,
         total_users=len(users),
-        total_drivers=len(drivers),
-        total_pending_onboarded=sum(1 for d in drivers if d.onboarding_stage != "Completed"),
-        total_completed_onboarded=sum(1 for d in drivers if d.onboarding_stage == "Completed" and d.id not in offboarded_ids),
-        total_pending_offboarded=len(pending_offboarding_driver_dicts),
-        total_completed_offboarded=len(completed_offboarding_driver_dicts),
+        total_drivers=drivers_total,
+        total_pending_onboarded=drivers_pending_total,
+        total_completed_onboarded=drivers_completed_total,
+        total_pending_offboarded=pending_total,
+        total_completed_offboarded=completed_total,
+        page=page,
+        per_page=per_page,
         lang=lang,
         rtl=rtl,
         all_businesses=all_businesses
@@ -512,11 +550,8 @@ def add_user():
 # -------------------------
 @admin_bp.route("/edit_user/<int:user_id>", methods=["POST"])
 @login_required
+@require_roles_or_owner("SuperAdmin", owner_loader=lambda user_id: User.query.get(user_id), owner_attr="id")
 def edit_user(user_id):
-    if current_user.role != "SuperAdmin":
-        flash("Access Denied", "danger")
-        return redirect(url_for("admin.dashboard"))
-
     form = EditUserForm()
     if not form.validate_on_submit():
         flash("Invalid or incomplete user data.", "danger")
@@ -524,16 +559,25 @@ def edit_user(user_id):
 
     user = User.query.get_or_404(user_id)
     try:
-        update_user_from_form(
-            user,
-            username=form.username.data or user.username,
-            name=form.name.data or user.name,
-            designation=form.designation.data or user.designation,
-            branch_city=form.branch_city.data or user.branch_city,
-            email=form.email.data or user.email,
-            role=form.role.data or user.role,
-        )
-        flash(f"User {user.username} updated successfully.", "success")
+        if current_user.role == "SuperAdmin":
+            update_user_from_form(
+                user,
+                username=form.username.data or user.username,
+                name=form.name.data or user.name,
+                designation=form.designation.data or user.designation,
+                branch_city=form.branch_city.data or user.branch_city,
+                email=form.email.data or user.email,
+                role=form.role.data or user.role,
+            )
+            flash(f"User {user.username} updated successfully.", "success")
+        else:
+            # Allow self-service updates for non-privileged users without role/username changes
+            user.name = form.name.data or user.name
+            user.designation = form.designation.data or user.designation
+            user.branch_city = form.branch_city.data or user.branch_city
+            user.email = form.email.data or user.email
+            db.session.commit()
+            flash("Profile updated successfully.", "success")
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to update user: {e}", "danger")

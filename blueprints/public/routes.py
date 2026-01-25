@@ -3,6 +3,7 @@ import re
 from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, session, send_from_directory, make_response
 from extensions import db, mail, limiter
 from models import Driver, User
+from utils.validation import parse_date
 from flask_mail import Message
 from werkzeug.utils import secure_filename
 from sqlalchemy.exc import IntegrityError
@@ -14,9 +15,13 @@ public_bp = Blueprint("public", __name__)
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "pdf"}
 ENGLISH_PATTERN = re.compile(r'^[A-Za-z0-9\s]+$')  # Letters, numbers, spaces
 
-UPLOAD_FOLDER = os.path.join(os.getcwd(), "static", "uploads")
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXT = {'.jpg', '.jpeg', '.png', '.pdf'}
+
+
+def _upload_root() -> str:
+    path = current_app.config["UPLOAD_FOLDER"]
+    os.makedirs(path, exist_ok=True)
+    return path
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -73,7 +78,7 @@ def register():
         if not validate_english(name, "Name") or not validate_english(iqaama_number, "Iqama Number") or not validate_english(absher_number, "Absher Number"):
             return redirect(url_for("public.register"))
 
-        iqaama_expiry = form.iqaama_expiry_date.data
+        iqaama_expiry = parse_date(form.iqaama_expiry_date.data)
         saudi_driving_license = form.saudi_driving_license.data == "yes"
         nationality = form.nationality.data
         city = form.city.data
@@ -98,7 +103,7 @@ def register():
             flash("❌ File too large. Maximum 16 MB.", "danger")
             return redirect(url_for("public.register"))
 
-        upload_folder = UPLOAD_FOLDER
+        upload_folder = _upload_root()
         safe_name = f"{name.replace(' ', '_').lower()}_{iqaama_number}"
         ext = iqama_card_upload.filename.rsplit(".", 1)[1].lower()
         file_name = secure_filename(f"{safe_name}.{ext}")

@@ -428,7 +428,7 @@ document.getElementById('addBusinessBtn').addEventListener('click', () => addBus
       info += `<p><strong>Nationality:</strong> ${d.nationality || 'N/A'}</p>`;
       info += `<p><strong>Mobile:</strong> ${d.mobile || 'N/A'}</p>`;
       info += `<p><strong>City:</strong> ${d.city || 'N/A'}</p>`;
-      if(d.iqama_card_upload) info += `<p><img src="/${encodeURIComponent(d.iqama_card_upload)}" class="upload-thumb"></p>`;
+      if(d.iqama_card_upload) info += `<p><img src="/static/uploads/${encodeURIComponent(d.iqama_card_upload)}" class="upload-thumb"></p>`;
       document.getElementById('driverInfoArea').innerHTML = info;
 
       // Approve form action

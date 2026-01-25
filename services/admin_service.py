@@ -8,7 +8,9 @@ from models import (
     DriverBusinessIDS,
     Offboarding,
     User,
+    _next_driver_id,
 )
+import sqlalchemy as sa
 from werkzeug.security import generate_password_hash
 
 
@@ -131,3 +133,28 @@ def change_user_password(user: User, new_password: str):
     user.password = generate_password_hash(new_password)
     db.session.commit()
     return user
+
+
+def backfill_driver_ids() -> int:
+    """Assign sequential driver_id values to drivers missing one."""
+
+    missing_drivers = (
+        Driver.query
+        .filter(sa.or_(Driver.driver_id == None, Driver.driver_id == ""))  # noqa: E711
+        .order_by(Driver.id.asc())
+        .with_for_update()
+        .all()
+    )
+
+    if not missing_drivers:
+        return 0
+
+    conn = db.session.connection()
+    updated = 0
+
+    for driver in missing_drivers:
+        driver.driver_id = _next_driver_id(conn)
+        updated += 1
+
+    db.session.commit()
+    return updated

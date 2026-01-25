@@ -295,6 +295,10 @@ def reject_driver(driver_id):
         flash("Invalid or missing CSRF token. Please try again.", "danger")
         return redirect(url_for("ops_manager.dashboard_ops"))
 
+    if driver_id <= 0:
+        flash("Invalid driver id.", "danger")
+        return redirect(url_for("ops_manager.dashboard_ops"))
+
     driver = Driver.query.get_or_404(driver_id)
 
     # Validate stage

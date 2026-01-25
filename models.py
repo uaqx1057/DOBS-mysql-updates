@@ -2,6 +2,48 @@
 from extensions import db
 from flask_login import UserMixin
 from datetime import datetime
+import secrets
+import sqlalchemy as sa
+
+# Driver ID generation settings
+DRIVER_ID_PREFIX = "D"
+DRIVER_ID_START = 2000
+
+# Allowed status enums (kept as simple string sets to ease validation and migrations)
+ONBOARDING_STAGES = (
+    "Ops Manager",
+    "HR",
+    "HR Final",
+    "Ops Supervisor",
+    "Fleet Manager",
+    "Finance",
+    "Completed",
+    "Rejected",
+)
+
+QIWA_CONTRACT_STATUSES = (
+    "Pending",
+    "Created",
+    "Approved",
+    "Rejected",
+)
+
+TRANSFER_STATUSES = (
+    "Pending",
+    "Transferred",
+    "Completed",
+    "Not Required",
+)
+
+OFFBOARDING_STATUSES = (
+    "Requested",
+    "OpsSupervisor",
+    "Fleet",
+    "Finance",
+    "HR",
+    "Completed",
+    "pending_tamm",
+)
 
 # =========================
 # User Model
@@ -17,6 +59,8 @@ class User(db.Model, UserMixin):
     designation = db.Column(db.String(100), nullable=True)
     branch_city = db.Column(db.String(100), nullable=True)
     email = db.Column(db.String(120), unique=True, nullable=True)
+    failed_logins = db.Column(db.Integer, default=0, nullable=False)
+    locked_until = db.Column(db.DateTime, nullable=True)
 
     # Relationship to Offboarding requests
     offboarding_requests = db.relationship("Offboarding", back_populates="requested_by")
@@ -28,11 +72,51 @@ class User(db.Model, UserMixin):
         return f"<User {self.username} ({self.role})>"
 
 
+class ResetToken(db.Model):
+    __tablename__ = "password_resets"
+
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(128), unique=True, nullable=False, default=lambda: secrets.token_urlsafe(48))
+    user_id = db.Column(db.Integer, db.ForeignKey("dobs_user.id"), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime, nullable=True)
+
+    user = db.relationship("User")
+
+    @property
+    def is_used(self):
+        return self.used_at is not None
+
+    def mark_used(self):
+        self.used_at = datetime.utcnow()
+
+    def __repr__(self):
+        return f"<ResetToken user={self.user_id} used={self.is_used}>"
+
+
 # =========================
 # Driver Model
 # =========================
 class Driver(db.Model):
     __tablename__ = "drivers"
+    __table_args__ = (
+        db.Index("ix_drivers_onboarding_stage", "onboarding_stage"),
+        db.Index("ux_drivers_driver_id", "driver_id", unique=True),
+        db.Index("ux_drivers_iqaama_number", "iqaama_number", unique=True),
+        db.CheckConstraint(
+            "onboarding_stage IN ('Ops Manager','HR','HR Final','Ops Supervisor','Fleet Manager','Finance','Completed','Rejected')",
+            name="ck_drivers_onboarding_stage",
+        ),
+        db.CheckConstraint(
+            "qiwa_contract_status IN ('Pending','Created','Approved','Rejected')",
+            name="ck_drivers_qiwa_status",
+        ),
+        db.CheckConstraint(
+            "sponsorship_transfer_status IN ('Pending','Transferred','Completed','Not Required')",
+            name="ck_drivers_transfer_status",
+        ),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     driver_id = db.Column(db.String, unique=True, nullable=False)
@@ -68,7 +152,7 @@ class Driver(db.Model):
     mobile_issued = db.Column(db.Boolean, default=False)
     tamm_authorized = db.Column(db.Boolean, default=False)
     transfer_fee_paid = db.Column(db.Boolean, default=False)
-    transfer_fee_amount = db.Column(db.Float, nullable=True)
+    transfer_fee_amount = db.Column(db.Numeric(12, 2), nullable=True)
     transfer_fee_paid_at = db.Column(db.DateTime, nullable=True)
     transfer_fee_receipt = db.Column(db.String(200), nullable=True)
     issued_mobile_number = db.Column(db.String(20), nullable=True)
@@ -147,10 +231,53 @@ class Driver(db.Model):
 
 
 # =========================
+# Driver ID generation hook
+# =========================
+def _next_driver_id(connection) -> str:
+    """Generate the next driver ID using a numeric sequence with prefix.
+
+    Falls back to DRIVER_ID_START when no records exist. Uses a MAX() query on
+    the numeric portion of driver_id to avoid collisions if rows were inserted
+    manually.
+    """
+
+    driver_table = Driver.__table__
+    num_expr = sa.cast(sa.func.substr(driver_table.c.driver_id, 2), sa.Integer)
+    stmt = sa.select(sa.func.max(num_expr)).where(driver_table.c.driver_id.isnot(None))
+
+    # Try to lock the rowset where supported to reduce race risk in MySQL
+    try:
+        stmt = stmt.with_for_update()
+    except Exception:
+        pass
+
+    max_num = connection.execute(stmt).scalar_one_or_none() or 0
+    base = max(DRIVER_ID_START - 1, max_num)
+    return f"{DRIVER_ID_PREFIX}{base + 1}"
+
+
+@sa.event.listens_for(Driver, "before_insert")
+def _set_driver_id(mapper, connection, target):  # pylint: disable=unused-argument
+    """Assign a sequential driver_id if one was not provided."""
+
+    if getattr(target, "driver_id", None):
+        return
+
+    target.driver_id = _next_driver_id(connection)
+
+
+# =========================
 # Offboarding Model
 # =========================
 class Offboarding(db.Model):
     __tablename__ = "offboarding"
+    __table_args__ = (
+        db.Index("ix_offboarding_status", "status"),
+        db.CheckConstraint(
+            "status IN ('Requested','OpsSupervisor','Fleet','Finance','HR','Completed','pending_tamm')",
+            name="ck_offboarding_status",
+        ),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     driver_id = db.Column(db.Integer, db.ForeignKey("drivers.id"), nullable=False)
@@ -165,12 +292,12 @@ class Offboarding(db.Model):
     fleet_cleared = db.Column(db.Boolean, default=False)
     fleet_cleared_at = db.Column(db.DateTime)
     fleet_damage_report = db.Column(db.Text)
-    fleet_damage_cost = db.Column(db.Float)
+    fleet_damage_cost = db.Column(db.Numeric(12, 2))
 
     finance_cleared = db.Column(db.Boolean, default=False)
     finance_cleared_at = db.Column(db.DateTime)
     finance_invoice_file = db.Column(db.String(200))
-    finance_adjustments = db.Column(db.Float)
+    finance_adjustments = db.Column(db.Numeric(12, 2))
     finance_note = db.Column(db.Text)
 
     hr_cleared = db.Column(db.Boolean, default=False)
@@ -271,7 +398,61 @@ class DriverBusinessIDS(db.Model):
 
     # Relationships
     driver = db.relationship("Driver", backref="driver_business_history")
-    business_id_obj = db.relationship("BusinessID", backref="driver_business_history")
+
+
+# =========================
+# Fleet / Vehicle Assignment Models
+# =========================
+class Vehicle(db.Model):
+    __tablename__ = "vehicles"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    registration_number = db.Column(db.String(255), nullable=False)
+    make = db.Column(db.String(255), nullable=False)
+    model = db.Column(db.String(255), nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(50), nullable=False, default="available")
+    branch_id = db.Column(db.Integer, nullable=True)
+    current_location = db.Column(db.String(255), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    assignments = db.relationship("AssignDriver", back_populates="vehicle", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<DriverBusiness id={self.id}, driver_id={self.driver_id}, business_id={self.business_id_id}>"
+        return f"<Vehicle {self.registration_number} ({self.status})>"
+
+
+class AssignDriver(db.Model):
+    __tablename__ = "assign_drivers"
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    vehicle_id = db.Column(db.BigInteger, db.ForeignKey("vehicles.id"), nullable=False)
+    driver_id = db.Column(db.Integer, db.ForeignKey("drivers.id"), nullable=False)
+    assign_date = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(50), nullable=False, default="active")
+    tam_authorization = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    vehicle = db.relationship("Vehicle", back_populates="assignments")
+    driver = db.relationship("Driver", backref="active_vehicle_assignment")
+
+    def __repr__(self):
+        return f"<AssignDriver vehicle={self.vehicle_id} driver={self.driver_id} status={self.status}>"
+
+
+class AssignDriverReport(db.Model):
+    __tablename__ = "assign_driver_reports"
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    vehicle_id = db.Column(db.BigInteger, db.ForeignKey("vehicles.id"), nullable=False)
+    driver_id = db.Column(db.Integer, db.ForeignKey("drivers.id"), nullable=False)
+    add_date = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    unassign_date = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(50), nullable=False, default="assign")
+
+    vehicle = db.relationship("Vehicle")
+    driver = db.relationship("Driver")
+
+    def __repr__(self):
+        return f"<AssignDriverReport vehicle={self.vehicle_id} driver={self.driver_id} status={self.status}>"

@@ -1,6 +1,6 @@
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileAllowed, FileField, FileRequired
-from wtforms import BooleanField, DateField, PasswordField, SelectField, StringField
+from wtforms import BooleanField, DateField, IntegerField, PasswordField, SelectField, StringField
 from wtforms.validators import Optional, DataRequired, Email, Length, EqualTo
 
 
@@ -13,6 +13,7 @@ class ReportsFilterForm(FlaskForm):
     report_type = SelectField(
         "Report Type",
         choices=[
+            ("all", "All Drivers"),
             ("onboarding", "Onboarded"),
             ("pending_onboarding", "Pending Onboarding"),
             ("offboarding", "Completed Offboarding"),
@@ -20,7 +21,7 @@ class ReportsFilterForm(FlaskForm):
             ("rejected", "Rejected"),
         ],
         validators=[Optional()],
-        default="onboarding",
+        default="all",
     )
     start_date = DateField("Start Date", validators=[Optional()])
     end_date = DateField("End Date", validators=[Optional()])
@@ -146,8 +147,9 @@ class OpsSupervisorApproveForm(FlaskForm):
 
 
 class FleetAssignForm(FlaskForm):
-    vehicle_plate = StringField("Vehicle Plate", validators=[DataRequired(), Length(max=50)])
-    vehicle_details = StringField("Vehicle Details", validators=[DataRequired(), Length(max=200)])
+    vehicle_id = IntegerField("Vehicle", validators=[DataRequired()])
+    vehicle_plate = StringField("Vehicle Plate", validators=[Optional(), Length(max=50)])
+    vehicle_details = StringField("Vehicle Details", validators=[Optional(), Length(max=200)])
     assignment_date = DateField("Assignment Date", validators=[DataRequired()], format="%Y-%m-%d")
     tamm_authorized = BooleanField("TAMM Authorized")
 

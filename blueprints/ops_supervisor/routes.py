@@ -73,7 +73,12 @@ def dashboard_ops_supervisor():
     all_businesses = []
 
     # Get all assigned business IDs
-    assigned_ids_subq = db.session.query(BusinessDriver.business_id).subquery()
+    # Only exclude IDs that are actively assigned (not yet transferred)
+    assigned_ids_subq = (
+        db.session.query(DriverBusinessIDS.business_id_id)
+        .filter(DriverBusinessIDS.transferred_at.is_(None))
+        .subquery()
+    )
 
     for b in businesses:
         available_ids = (
@@ -81,7 +86,7 @@ def dashboard_ops_supervisor():
             .filter(
                 BusinessID.business_id == b.id,
                 BusinessID.is_active == True,
-                ~BusinessID.id.in_(assigned_ids_subq)
+                ~BusinessID.id.in_(assigned_ids_subq.select())
             )
             .all()
         )

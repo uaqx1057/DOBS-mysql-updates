@@ -381,7 +381,7 @@
     // Show uploaded files if available
     if (d.iqama_card_upload || d.tamm_authorization_ss || d.transfer_fee_receipt) {
       html += `<div class="image-row">`;
-      if (d.iqama_card_upload) html += `<div><label>Iqama Card</label><img src="/${d.iqama_card_upload}" class="receipt-thumb"></div>`;
+      if (d.iqama_card_upload) html += `<div><label>Iqama Card</label><img src="/static/uploads/${d.iqama_card_upload}" class="receipt-thumb"></div>`;
       if (d.tamm_authorization_ss) html += `<div><label>TAMM Authorization</label><img src="/static/uploads/${d.tamm_authorization_ss}" class="receipt-thumb"></div>`;
       if (d.transfer_fee_receipt) html += `<div><label>Transfer Proof</label><a href="/static/uploads/${d.transfer_fee_receipt}" target="_blank"><img src="/static/uploads/${d.transfer_fee_receipt}" class="receipt-thumb"></a></div>`;
       html += `</div>`;

@@ -13,6 +13,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from io import StringIO
 from flask import Response
 from forms.common import ReportsFilterForm
+from sqlalchemy import or_
 
 
 reports_bp = Blueprint("reports_bp", __name__, template_folder="templates")
@@ -25,13 +26,53 @@ SAUDI_CITIES = [
     "Al-Kharj", "Al-Jouf"
 ]
 
+
+# ------------------------
+# Helpers
+# ------------------------
+def _format_platform_assignments(driver):
+    """Return a readable platform/business assignment string for a driver."""
+
+    labels = []
+    for link in getattr(driver, "business_links", []) or []:
+        biz_id = getattr(link, "business_id_obj", None)
+        if not biz_id:
+            continue
+
+        business_name = getattr(biz_id.business, "name", None) if getattr(biz_id, "business", None) else None
+        value = getattr(biz_id, "value", None)
+
+        if business_name and value:
+            labels.append(f"{business_name} ({value})")
+        elif value:
+            labels.append(str(value))
+        elif business_name:
+            labels.append(business_name)
+
+    if labels:
+        return ", ".join(labels)
+
+    fallback_platform = getattr(driver, "platform", None)
+    fallback_platform_id = getattr(driver, "platform_id", None)
+
+    if fallback_platform and fallback_platform_id:
+        return f"{fallback_platform} ({fallback_platform_id})"
+    if fallback_platform:
+        return str(fallback_platform)
+    if fallback_platform_id:
+        return str(fallback_platform_id)
+
+    return ""
+
 # ------------------------
 # Filter function
 # ------------------------
 def get_filtered_drivers(report_type=None, start_date=None, end_date=None, city=None, transfer_status=None):
     query = Driver.query
 
-    if report_type == "onboarding":
+    if not report_type or report_type == "all":
+        pass  # no stage filter
+    elif report_type == "onboarding":
         query = query.filter(
             Driver.onboarding_stage == "Completed",
             ~Driver.id.in_(db.session.query(Offboarding.driver_id))
@@ -50,6 +91,26 @@ def get_filtered_drivers(report_type=None, start_date=None, end_date=None, city=
         query = query.filter(Driver.onboarding_stage == "Rejected")
     elif report_type in ["Ops Manager", "HR", "Ops Supervisor", "Fleet Manager", "Finance"]:
         query = query.filter(Driver.onboarding_stage == report_type)
+    elif report_type == "pending_ops_manager_all":
+        query = query.outerjoin(Offboarding).filter(
+            or_(Driver.onboarding_stage == "Ops Manager", Offboarding.status == "Ops Manager")
+        )
+    elif report_type == "pending_hr_all":
+        query = query.outerjoin(Offboarding).filter(
+            or_(Driver.onboarding_stage == "HR", Offboarding.status == "HR")
+        )
+    elif report_type == "pending_ops_supervisor_all":
+        query = query.outerjoin(Offboarding).filter(
+            or_(Driver.onboarding_stage == "Ops Supervisor", Offboarding.status == "OpsSupervisor")
+        )
+    elif report_type == "pending_fleet_manager_all":
+        query = query.outerjoin(Offboarding).filter(
+            or_(Driver.onboarding_stage == "Fleet Manager", Offboarding.status == "Fleet")
+        )
+    elif report_type == "pending_finance_all":
+        query = query.outerjoin(Offboarding).filter(
+            or_(Driver.onboarding_stage == "Finance", Offboarding.status == "Finance")
+        )
 
     if start_date:
         start_date_dt = datetime.strptime(start_date, "%Y-%m-%d")
@@ -105,12 +166,19 @@ def reports():
         Driver.assignment_date < month_end
     ).count()
 
-    # Pending approvals by department
-    pending_ops_manager = Driver.query.filter(Driver.onboarding_stage == 'Ops Manager').count()
-    pending_hr = Driver.query.filter(Driver.onboarding_stage == 'HR').count()
-    pending_ops_supervisor = Driver.query.filter(Driver.onboarding_stage == 'Ops Supervisor').count()
-    pending_fleet_manager = Driver.query.filter(Driver.onboarding_stage == 'Fleet Manager').count()
-    pending_finance = Driver.query.filter(Driver.onboarding_stage == 'Finance').count()
+    # Pending approvals by department (Onboarding)
+    pending_ops_manager_on = Driver.query.filter(Driver.onboarding_stage == 'Ops Manager').count()
+    pending_hr_on = Driver.query.filter(Driver.onboarding_stage == 'HR').count()
+    pending_ops_supervisor_on = Driver.query.filter(Driver.onboarding_stage == 'Ops Supervisor').count()
+    pending_fleet_manager_on = Driver.query.filter(Driver.onboarding_stage == 'Fleet Manager').count()
+    pending_finance_on = Driver.query.filter(Driver.onboarding_stage == 'Finance').count()
+
+    # Pending approvals by department (Offboarding)
+    pending_ops_manager_off = Offboarding.query.filter(Offboarding.status == 'Ops Manager').count()
+    pending_hr_off = Offboarding.query.filter(Offboarding.status == 'HR').count()
+    pending_ops_supervisor_off = Offboarding.query.filter(Offboarding.status == 'OpsSupervisor').count()
+    pending_fleet_manager_off = Offboarding.query.filter(Offboarding.status == 'Fleet').count()
+    pending_finance_off = Offboarding.query.filter(Offboarding.status == 'Finance').count()
 
     if request.method == "POST":
         if not form.validate_on_submit():
@@ -122,6 +190,9 @@ def reports():
             city = form.city.data
             transfer_status = form.transfer_status.data
             drivers = get_filtered_drivers(report_type, start_date, end_date, city, transfer_status)
+            if drivers:
+                for d in drivers:
+                    d.platform_display = _format_platform_assignments(d)
 
     return render_template(
         "reports.html",
@@ -133,11 +204,16 @@ def reports():
         pending_offboarded=pending_offboarded,
         rejected_drivers=rejected_drivers,
         monthly_transfers_completed=monthly_transfers_completed,
-        pending_ops_manager=pending_ops_manager,
-        pending_hr=pending_hr,
-        pending_ops_supervisor=pending_ops_supervisor,
-        pending_fleet_manager=pending_fleet_manager,
-        pending_finance=pending_finance,
+        pending_ops_manager_on=pending_ops_manager_on,
+        pending_hr_on=pending_hr_on,
+        pending_ops_supervisor_on=pending_ops_supervisor_on,
+        pending_fleet_manager_on=pending_fleet_manager_on,
+        pending_finance_on=pending_finance_on,
+        pending_ops_manager_off=pending_ops_manager_off,
+        pending_hr_off=pending_hr_off,
+        pending_ops_supervisor_off=pending_ops_supervisor_off,
+        pending_fleet_manager_off=pending_fleet_manager_off,
+        pending_finance_off=pending_finance_off,
         report_type=report_type,
         start_date=start_date,
         end_date=end_date,
@@ -162,6 +238,8 @@ def reports_ajax():
         request.args.get("city"),
         request.args.get("transfer_status")
     )
+    for d in drivers:
+        d.platform_display = _format_platform_assignments(d)
     return render_template("drivers_table_partial.html", drivers=drivers)
 
 
@@ -196,7 +274,7 @@ def export_csv():
     writer = csv.writer(output)
     
     # Header
-    writer.writerow(["Full Name", "Iqama Number", "City", "Assignment Date", "Transfer Done", "Stage"])
+    writer.writerow(["Full Name", "Iqama Number", "City", "Platform", "Assignment Date", "Transfer Done", "Stage"])
     
     # Rows (defensive attribute access for mismatched column names)
     for d in drivers:
@@ -207,11 +285,13 @@ def export_csv():
         assignment_date_str = assignment_date.strftime("%Y-%m-%d") if assignment_date else ""
         transfer_status = safe_get(d, "sponsorship_transfer_status", default="Pending") or "Pending"
         stage = safe_get(d, "onboarding_stage") or ""
+        platform_label = _format_platform_assignments(d)
 
         writer.writerow([
             name,
             iqama_number,
             city,
+            platform_label,
             assignment_date_str,
             transfer_status,
             stage
@@ -267,7 +347,7 @@ def export_pdf():
     elements.append(Spacer(1, 12))
 
     # Table header
-    data = [["Full Name", "Iqama Number", "City", "Assignment Date", "Transfer Done", "Stage"]]
+    data = [["Full Name", "Iqama Number", "City", "Platform", "Assignment Date", "Transfer Done", "Stage"]]
 
     # Table rows (defensive attribute access)
     for d in drivers:
@@ -278,8 +358,9 @@ def export_pdf():
         assignment_date_str = assignment_date.strftime("%Y-%m-%d") if assignment_date else ""
         transfer_status = safe_get(d, "sponsorship_transfer_status", default="Pending") or "Pending"
         stage = safe_get(d, "onboarding_stage") or ""
+        platform_label = _format_platform_assignments(d)
 
-        data.append([full_name, iqama_number, city, assignment_date_str, transfer_status, stage])
+        data.append([full_name, iqama_number, city, platform_label, assignment_date_str, transfer_status, stage])
 
     # Create table
     table = Table(data, repeatRows=1)

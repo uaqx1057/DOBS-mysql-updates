@@ -7,7 +7,7 @@ from datetime import datetime, date
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy.orm import joinedload
-from models import Offboarding, Driver, User
+from models import Offboarding, Driver, User, Vehicle, AssignDriver, AssignDriverReport
 from utils.email_utils import send_password_change_email
 import os
 from flask_wtf.csrf import validate_csrf, CSRFError
@@ -74,6 +74,23 @@ def dashboard_fleet():
         .all()
     )
 
+    # Available vehicles (not assigned and marked available)
+    assigned_vehicle_ids = (
+        db.session.query(AssignDriver.vehicle_id)
+        .filter(AssignDriver.status == "active")
+        .subquery()
+    )
+
+    available_vehicles = (
+        Vehicle.query
+        .filter(
+            Vehicle.status == "available",
+            ~Vehicle.id.in_(assigned_vehicle_ids.select())
+        )
+        .order_by(Vehicle.registration_number)
+        .all()
+    )
+
     lang = session.get("lang", "en")
     template = "rtl_dashboard_fleet.html" if lang == "ar" else "dashboard_fleet.html"
 
@@ -84,6 +101,7 @@ def dashboard_fleet():
         total_drivers=total_drivers,
         total_users=offboarding_fleet,
         total_tamm=offboarding_pending_tamm,
+        available_vehicles=available_vehicles,
     )
 
 
@@ -104,17 +122,16 @@ def assign_vehicle(driver_id):
     driver = Driver.query.get_or_404(driver_id)
 
     # Gather form data
-    vehicle_plate = (form.vehicle_plate.data or "").strip()
-    vehicle_details = (form.vehicle_details.data or "").strip()
-    assignment_date = form.assignment_date.data.strftime("%Y-%m-%d") if form.assignment_date.data else ""
-    tamm_authorized = request.form.get("tamm_authorized")
+    vehicle_id = form.vehicle_id.data
+    assignment_date = form.assignment_date.data
+    tamm_authorized = bool(form.tamm_authorized.data)
     tamm_file = request.files.get("tamm_authorization_ss")
 
     # Validate required fields
-    if not all([vehicle_plate, vehicle_details, assignment_date, tamm_authorized]):
+    if not (vehicle_id and assignment_date and tamm_authorized):
         return jsonify({
             "success": False,
-            "message": "All fields, including TAMM Authorization, must be filled before approval."
+            "message": "Vehicle selection, assignment date, and TAMM Authorization are required."
         }), 400
 
     if not tamm_file or not tamm_file.filename:
@@ -124,25 +141,62 @@ def assign_vehicle(driver_id):
         }), 400
 
     try:
-        # Validate and parse date
-        parsed_date = datetime.strptime(assignment_date, "%Y-%m-%d").date()
-        if parsed_date > date.today():
+        # Validate date
+        if assignment_date > date.today():
             return jsonify({"success": False, "message": "Assignment date cannot be in the future."}), 400
+
+        vehicle = Vehicle.query.get(vehicle_id)
+        if not vehicle:
+            return jsonify({"success": False, "message": "Selected vehicle not found."}), 404
+
+        if vehicle.status != "available":
+            return jsonify({"success": False, "message": "Vehicle is not available."}), 400
+
+        vehicle_plate = vehicle.registration_number
+        vehicle_details = f"{vehicle.make} {vehicle.model}" if vehicle.make and vehicle.model else "N/A"
+
+        # Ensure driver and vehicle are not already actively assigned
+        existing_driver_assignment = AssignDriver.query.filter_by(driver_id=driver.id, status="active").first()
+        if existing_driver_assignment:
+            return jsonify({"success": False, "message": "Driver is already assigned to a vehicle."}), 400
+
+        existing_vehicle_assignment = AssignDriver.query.filter_by(vehicle_id=vehicle.id, status="active").first()
+        if existing_vehicle_assignment:
+            return jsonify({"success": False, "message": "Vehicle is already assigned to another driver."}), 400
 
         # Generate safe filename
         ext = os.path.splitext(tamm_file.filename)[1].lower()
         safe_name = secure_filename(
-            f"{driver.name}_{driver.iqaama_number}_{vehicle_plate}_TAMM_Authorisation{ext}"
+            f"{driver.name}_{driver.iqaama_number}_{vehicle.registration_number}_TAMM_Authorisation{ext}"
         )
         upload_path = os.path.join(current_app.config["UPLOAD_FOLDER"], safe_name)
         tamm_file.save(upload_path)
 
-        # Update driver record
-        driver.car_details = f"{vehicle_plate} - {vehicle_details}"
-        driver.assignment_date = parsed_date
+        # Update driver record and assignment tables
+        driver.car_details = f"{vehicle.registration_number} - {vehicle.make}/{vehicle.model}"
+        driver.assignment_date = assignment_date
         driver.tamm_authorized = True
         driver.tamm_authorization_ss = safe_name
         driver.mark_fleet_manager_approved()
+
+        assignment_link = AssignDriver(
+            vehicle_id=vehicle.id,
+            driver_id=driver.id,
+            assign_date=assignment_date,
+            status="active",
+            tam_authorization=True
+        )
+        db.session.add(assignment_link)
+
+        assignment_report = AssignDriverReport(
+            vehicle_id=vehicle.id,
+            driver_id=driver.id,
+            add_date=datetime.utcnow(),
+            status="assign"
+        )
+        db.session.add(assignment_report)
+
+        vehicle.status = "assigned"
 
         # Determine next stage and recipients
         if not driver.qiwa_contract_created:
@@ -159,7 +213,7 @@ def assign_vehicle(driver_id):
         driver.onboarding_stage = next_stage
         db.session.commit()
 
-        # Send notification email
+        # Send notification email; swallow network failures so assignment succeeds even if email fails.
         if recipients:
             msg = Message(
                 subject=f"Driver Assigned Vehicle & Ready for next Stage | تم تعيين مركبة للسائق وجاهز لمرحلة  {driver.name}",
@@ -234,9 +288,11 @@ def assign_vehicle(driver_id):
             </html>
             """
 
-            mail.send(msg)
-
-            current_app.logger.info(f"[FLEET] {next_stage} notification email sent successfully.")
+            try:
+                mail.send(msg)
+                current_app.logger.info(f"[FLEET] {next_stage} notification email sent successfully.")
+            except Exception as mail_err:
+                current_app.logger.error(f"[FLEET] Notification email failed: {mail_err}")
         else:
             current_app.logger.warning(f"[FLEET] No {next_stage} users with email found. Skipping notification.")
 

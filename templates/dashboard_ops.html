@@ -565,14 +565,19 @@
 
 
     function confirmReject(){
-    const driverId=document.getElementById("driverIdHidden").value;
-    if(!driverId){alert("Driver ID missing.");return;}
-    if(confirm("Reject this driver?")){
-      const form=document.getElementById("driverForm");
-      form.action=`/dashboard/ops/reject_driver/${driverId}`;
-      form.method="POST";
-      form.submit();
-    }
+      const driverForm = document.getElementById("driverForm");
+      const driverId = parseInt(driverForm.dataset.driverId || document.getElementById("driverIdHidden").value, 10);
+
+      if (!driverId || Number.isNaN(driverId) || driverId <= 0) {
+        alert("Driver ID missing. Please reopen the driver card and try again.");
+        return false;
+      }
+
+      if (confirm("Are you sure you want to reject this driver?")) {
+        driverForm.action = `/dashboard/ops/reject_driver/${driverId}`;
+        driverForm.method = "POST";
+        driverForm.submit();
+      }
     }
 
     window.addEventListener("click",e=>{
@@ -604,19 +609,19 @@
 
 
     function confirmReject() {
-    const driverForm = document.getElementById("driverForm");
-    const driverId = driverForm.dataset.driverId || document.getElementById("driverIdHidden").value;
+      const driverForm = document.getElementById("driverForm");
+      const driverId = parseInt(driverForm.dataset.driverId || document.getElementById("driverIdHidden").value, 10);
 
-    if (!driverId) {
-      alert("Driver ID not found.");
-      return false;
-    }
+      if (!driverId || Number.isNaN(driverId) || driverId <= 0) {
+        alert("Driver ID not found. Please reopen the driver card and try again.");
+        return false;
+      }
 
-    if (confirm("Are you sure you want to reject this driver?")) {
-      driverForm.action = `/dashboard/ops/reject_driver/${driverId}`;
-      driverForm.method = "POST";
-      driverForm.submit();
-    }
+      if (confirm("Are you sure you want to reject this driver?")) {
+        driverForm.action = `/dashboard/ops/reject_driver/${driverId}`;
+        driverForm.method = "POST";
+        driverForm.submit();
+      }
     }
 
 

@@ -1,12 +1,16 @@
 # blueprints/auth/routes.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session, current_app
-from flask_login import login_user, logout_user, login_required
+from flask import Blueprint, render_template, request, redirect, url_for, flash, session, current_app, jsonify
+from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy.exc import OperationalError
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
+from datetime import datetime, timedelta
+import re
+import secrets
 
 from forms.auth import LoginForm
-from models import User  # dob_user model
+from models import User, ResetToken  # dob_user model
 from extensions import db, login_manager, limiter
+from flask_mail import Message
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -31,12 +35,35 @@ def login():
             flash("Database is unavailable. Please try again in a moment.", "danger")
             return render_template("login.html", form=form), 503
 
+        if user and _lockout_active(user):
+            flash("Account locked. Try again later.", "danger")
+            return render_template("login.html", form=form), 429
+
         if not user or not check_password_hash(user.password, password):
+            if user:
+                locked = _register_failed_login(user)
+                if locked:
+                    flash("Too many attempts. Account locked for 15 minutes.", "danger")
+                    return render_template("login.html", form=form), 429
             flash("Invalid username or password", "danger")
+            current_app.logger.info(
+                "login_failed", extra={"username": username, "ip": request.remote_addr, "path": request.path}
+            )
             return render_template("login.html", form=form)
 
+        # Handle 2FA via email OTP when enabled and user has email
+        if _two_fa_enabled() and user.email:
+            _issue_otp(user)
+            flash("Enter the code sent to your email.", "info")
+            session["otp_pending"] = True
+            return redirect(url_for("auth.verify_otp"))
+
         login_user(user)
+        _clear_lockout(user)
         flash("Login successful!", "success")
+        current_app.logger.info(
+            "login_success", extra={"username": user.username, "ip": request.remote_addr, "path": request.path}
+        )
 
         role_redirects = {
             "SuperAdmin": "admin.dashboard",
@@ -54,7 +81,199 @@ def login():
 
 @auth_bp.route("/logout")
 @login_required
+@limiter.limit("30 per minute")
 def logout():
     logout_user()
     flash("You have been logged out.", "info")
+    current_app.logger.info(
+        "logout", extra={"username": getattr(current_user, 'username', None), "ip": request.remote_addr, "path": request.path}
+    )
     return redirect(url_for("auth.login"))
+
+
+@auth_bp.route("/login/otp", methods=["GET", "POST"])
+@limiter.limit("10 per minute")
+def verify_otp():
+    if not session.get("otp_pending"):
+        flash("No OTP pending.", "warning")
+        return redirect(url_for("auth.login"))
+
+    if request.method == "GET":
+        return render_template("login.html")
+
+    code = request.form.get("code") or (request.json.get("code") if request.is_json else "")
+    user_id = session.get("otp_user_id")
+    if not _otp_valid(code) or not user_id:
+        flash("Invalid or expired code.", "danger")
+        return redirect(url_for("auth.verify_otp")), 400
+
+    user = User.query.get(user_id)
+    if not user:
+        flash("Account not found.", "danger")
+        return redirect(url_for("auth.login")), 400
+
+    login_user(user)
+    _clear_lockout(user)
+    current_app.logger.info(
+        "login_success_2fa", extra={"username": user.username, "ip": request.remote_addr, "path": request.path}
+    )
+
+    # Clear OTP session
+    for key in ["otp_pending", "otp_user_id", "otp_code", "otp_expires_at"]:
+        session.pop(key, None)
+
+    role_redirects = {
+        "SuperAdmin": "admin.dashboard",
+        "HR": "hr.dashboard_hr",
+        "OpsCoordinator": "ops_coordinator.dashboard_ops_coordinator",
+        "OpsManager": "ops_manager.dashboard_ops",
+        "OpsSupervisor": "ops_supervisor.dashboard_ops_supervisor",
+        "FleetManager": "fleet.dashboard_fleet",
+        "FinanceManager": "finance.dashboard_finance",
+    }
+
+    flash("Login successful!", "success")
+    return redirect(url_for(role_redirects.get(user.role, "auth.login")))
+
+
+def _json_or_html(payload, status=200):
+    if request.accept_mimetypes.best == "application/json":
+        return jsonify(payload), status
+    # Fallback: flash message and redirect to login
+    if "message" in payload:
+        flash(payload["message"], "info" if status < 400 else "danger")
+    return redirect(url_for("auth.login")), status
+
+
+_PW_PATTERN = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{12,}$")
+
+
+def _validate_password_complexity(pw: str) -> bool:
+    return bool(_PW_PATTERN.match(pw or ""))
+
+
+def _two_fa_enabled():
+    return current_app.config.get("TWO_FA_EMAIL_ENABLED", False)
+
+
+def _issue_otp(user):
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    expires_at = datetime.utcnow() + timedelta(minutes=current_app.config.get("TWO_FA_EMAIL_EXPIRY_MIN", 10))
+    session["otp_user_id"] = user.id
+    session["otp_code"] = code
+    session["otp_expires_at"] = expires_at.isoformat()
+    if user.email:
+        try:
+            msg = Message(subject="Your login code", recipients=[user.email])
+            msg.body = f"Your login code is: {code}\nIt expires in {current_app.config.get('TWO_FA_EMAIL_EXPIRY_MIN', 10)} minutes."
+            current_app.extensions["mail"].send(msg)
+        except Exception:
+            current_app.logger.exception("Failed to send OTP email")
+    return code
+
+
+def _otp_valid(code):
+    stored = session.get("otp_code")
+    exp_raw = session.get("otp_expires_at")
+    if not stored or not exp_raw:
+        return False
+    try:
+        expires_at = datetime.fromisoformat(exp_raw)
+    except ValueError:
+        return False
+    if datetime.utcnow() > expires_at:
+        return False
+    return secrets.compare_digest(code or "", stored)
+
+
+@auth_bp.route("/reset/request", methods=["POST"])
+@limiter.limit("5 per minute")
+def request_password_reset():
+    identifier = (request.form.get("identifier") or request.json.get("identifier") if request.is_json else "").strip()
+    if not identifier:
+        return _json_or_html({"message": "Identifier (username or email) is required."}, 400)
+
+    user = User.query.filter((User.username == identifier) | (User.email == identifier)).first()
+
+    # Always respond success to avoid user enumeration
+    success_message = "If the account exists, a reset link has been sent."
+
+    if not user:
+        return _json_or_html({"message": success_message})
+
+    expires_at = datetime.utcnow() + timedelta(hours=2)
+    token = ResetToken(user_id=user.id, expires_at=expires_at)
+    db.session.add(token)
+    db.session.commit()
+
+    reset_link = url_for("auth.reset_password", token=token.token, _external=True)
+    try:
+        from flask_mail import Message
+
+        msg = Message(
+            subject="Password reset instructions",
+            recipients=[user.email] if user.email else [],
+        )
+        msg.body = f"Use the link to reset your password (valid for 2 hours):\n{reset_link}"
+        msg.html = f"<p>Use the link to reset your password (valid for 2 hours):</p><p><a href='{reset_link}'>{reset_link}</a></p>"
+        if msg.recipients:
+            current_app.extensions["mail"].send(msg)
+    except Exception:
+        current_app.logger.exception("Failed to send reset email")
+
+    return _json_or_html({"message": success_message})
+
+
+@auth_bp.route("/reset/<token>", methods=["GET", "POST"])
+@limiter.limit("10 per minute")
+def reset_password(token):
+    reset = ResetToken.query.filter_by(token=token).first()
+    now = datetime.utcnow()
+
+    if not reset or reset.is_used or reset.expires_at < now:
+        return _json_or_html({"message": "Invalid or expired reset link."}, 400)
+
+    if request.method == "GET":
+        return _json_or_html({"message": "Reset link is valid."})
+
+    new_password = (request.form.get("new_password") or request.json.get("new_password") if request.is_json else "")
+    if not _validate_password_complexity(new_password):
+        return _json_or_html({"message": "Password must be 12+ chars and include upper, lower, digit, and symbol."}, 400)
+
+    reset.user.password = generate_password_hash(new_password)
+    reset.user.failed_logins = 0
+    reset.user.locked_until = None
+    reset.mark_used()
+    db.session.commit()
+
+    return _json_or_html({"message": "Password updated. You can now log in."})
+
+
+_LOCK_THRESHOLD = 5
+_LOCK_WINDOW_MINUTES = 15
+
+
+def _lockout_active(user):
+    now = datetime.utcnow()
+    return bool(user.locked_until and user.locked_until > now)
+
+
+def _register_failed_login(user):
+    now = datetime.utcnow()
+    user.failed_logins = (user.failed_logins or 0) + 1
+    if user.failed_logins >= _LOCK_THRESHOLD:
+        user.locked_until = now + timedelta(minutes=_LOCK_WINDOW_MINUTES)
+        user.failed_logins = 0  # reset counter after locking
+        db.session.commit()
+        current_app.logger.warning(
+            "login_locked", extra={"username": user.username, "ip": request.remote_addr, "path": request.path}
+        )
+        return True
+    db.session.commit()
+    return False
+
+
+def _clear_lockout(user):
+    user.failed_logins = 0
+    user.locked_until = None
+    db.session.commit()

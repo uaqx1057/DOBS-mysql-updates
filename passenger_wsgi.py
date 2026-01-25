@@ -5,8 +5,10 @@ import sys
 import logging
 
 BASE_DIR = os.path.dirname(__file__)
-VENV_PATH = "/home/dobsykjq/virtualenv/dobs2/3.13"
-APP_LOG = os.path.join(BASE_DIR, "app.log")
+VENV_PATH = os.environ.get("VENV_PATH", os.path.join(BASE_DIR, "venv"))
+LOG_DIR = os.environ.get("APP_LOG_DIR", os.path.join(BASE_DIR, "logs"))
+os.makedirs(LOG_DIR, exist_ok=True)
+APP_LOG = os.path.join(LOG_DIR, os.environ.get("APP_LOG_FILE", "passenger.log"))
 
 # ---------- logging ----------
 logging.basicConfig(
@@ -14,8 +16,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-sys.stdout = open(APP_LOG, "a")
-sys.stderr = open(APP_LOG, "a")
 logging.info("Starting WSGI application...")
 
 # ---------- activate venv ----------

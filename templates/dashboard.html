@@ -34,6 +34,12 @@
     .search-box input { padding:10px 14px; border-radius:8px; border:2px solid var(--border); min-width:260px; font-size:14px; transition:border 0.3s; }
     .search-box input:focus { outline:none; border-color:var(--primary); }
 
+    .pagination-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:6px 0 16px; }
+    .page-chip { background:#f1f5f9; border:1px solid var(--border); border-radius:18px; padding:8px 12px; font-weight:600; color:var(--text-light); }
+    .page-link { text-decoration:none; padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:#fff; color:var(--text-dark); font-weight:600; transition:all 0.2s; }
+    .page-link:hover { background:var(--primary); color:#fff; border-color:var(--primary); }
+    .page-link.disabled { opacity:0.45; pointer-events:none; }
+
     .grid { display:grid; grid-template-columns: 1fr 360px; gap:20px; align-items:start; }
     .card { background:var(--card-bg); padding:16px; border-radius:10px; box-shadow:var(--shadow); border:1px solid var(--border); }
 
@@ -439,6 +445,14 @@
             </div>
 
             <p class="text-muted">Showing both pending and completed; use tabs to switch.</p>
+          </div>
+          <div class="pagination-bar">
+            <span class="page-chip">Page {{ page }} · {{ per_page }} per page</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <a class="page-link {% if page <= 1 %}disabled{% endif %}" href="{% if page > 1 %}{{ url_for('admin.dashboard', page=page-1, per_page=per_page) }}{% else %}#{% endif %}">Prev</a>
+              <a class="page-link {% if page * per_page >= total_drivers %}disabled{% endif %}" href="{% if page * per_page < total_drivers %}{{ url_for('admin.dashboard', page=page+1, per_page=per_page) }}{% else %}#{% endif %}">Next</a>
+            </div>
+            <small style="color:var(--text-light);">Drivers and offboarding lists are paginated.</small>
           </div>
               <!-- Pending drivers -->
               <div id="pendingTab" style="display:block;">
