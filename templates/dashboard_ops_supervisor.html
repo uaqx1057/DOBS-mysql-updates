@@ -492,6 +492,8 @@ document.getElementById('addBusinessBtn').addEventListener('click', () => addBus
 
     function closeOffboardingModal(){ document.getElementById('offboardingModal').classList.remove('show'); currentOffId = null; }
 
+    const csrfToken = "{{ csrf_token() }}";
+
     // Offboarding form submit via API
     document.getElementById('offboardingForm').addEventListener('submit', async function(e){
       e.preventDefault();
@@ -507,7 +509,10 @@ document.getElementById('addBusinessBtn').addEventListener('click', () => addBus
       try{
         const res = await fetch(`/dashboard/ops_supervisor/api/clear_offboarding/${currentOffId}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+          },
           body: JSON.stringify(payload)
         });
         const data = await res.json();

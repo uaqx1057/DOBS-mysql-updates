@@ -14,4 +14,5 @@ login_manager.login_view = "auth.login"
 migrate = Migrate()
 csrf = CSRFProtect()
 babel = Babel()
-limiter = Limiter(key_func=get_remote_address)
+# Default to in-memory storage; overridden by app config if a supported backend is available.
+limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")

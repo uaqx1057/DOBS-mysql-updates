@@ -218,8 +218,17 @@ def dashboard():
     # Serialize drivers
     # -------------------------
     driver_dicts = [serialize_driver(d) for d in drivers]
-    pending_offboarding_driver_dicts = [serialize_driver(o.driver, offboarding_record=o) for o in pending_offboarding_records]
-    completed_offboarding_driver_dicts = [serialize_driver(o.driver, offboarding_record=o) for o in completed_offboarding_records]
+    # Skip any offboarding records without an attached driver to avoid AttributeError
+    pending_offboarding_driver_dicts = [
+        serialize_driver(o.driver, offboarding_record=o)
+        for o in pending_offboarding_records
+        if o.driver is not None
+    ]
+    completed_offboarding_driver_dicts = [
+        serialize_driver(o.driver, offboarding_record=o)
+        for o in completed_offboarding_records
+        if o.driver is not None
+    ]
     fully_onboarded_only = [
         serialize_driver(d) 
         for d in drivers 

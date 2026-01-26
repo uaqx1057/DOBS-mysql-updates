@@ -14,10 +14,16 @@ from flask_mail import Message
 
 auth_bp = Blueprint("auth", __name__)
 
+
+def _role_key(role_raw: str) -> str:
+    return "".join(ch for ch in (role_raw or "").lower() if ch.isalnum())
+
+
 # Load user callback
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+
 
 @auth_bp.route("/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute")
@@ -65,17 +71,29 @@ def login():
             "login_success", extra={"username": user.username, "ip": request.remote_addr, "path": request.path}
         )
 
+        role_key = _role_key(user.role)
         role_redirects = {
-            "SuperAdmin": "admin.dashboard",
-            "HR": "hr.dashboard_hr",
-            "OpsCoordinator": "ops_coordinator.dashboard_ops_coordinator",
-            "OpsManager": "ops_manager.dashboard_ops",
-            "OpsSupervisor": "ops_supervisor.dashboard_ops_supervisor",
-            "FleetManager": "fleet.dashboard_fleet",
-            "FinanceManager": "finance.dashboard_finance",
+            "superadmin": "admin.dashboard",
+            "hr": "hr.dashboard_hr",
+            "opscoordinator": "ops_coordinator.dashboard_ops_coordinator",
+            "opsmanager": "ops_manager.dashboard_ops",
+            "opssupervisor": "ops_supervisor.dashboard_ops_supervisor",
+            "fleetmanager": "fleet.dashboard_fleet",
+            "financemanager": "finance.dashboard_finance",
         }
 
-        return redirect(url_for(role_redirects.get(user.role, "auth.login")))
+        target = role_redirects.get(role_key)
+        if not target:
+            current_app.logger.warning(
+                "login_role_unmapped", extra={"user": user.username, "role": user.role}
+            )
+            flash("Role is not configured for redirect.", "warning")
+            return render_template("login.html", form=form)
+
+        current_app.logger.info(
+            "login_redirect", extra={"user": user.username, "role": user.role, "target": target}
+        )
+        return redirect(url_for(target))
 
     return render_template("login.html", form=form)
 
@@ -122,18 +140,30 @@ def verify_otp():
     for key in ["otp_pending", "otp_user_id", "otp_code", "otp_expires_at"]:
         session.pop(key, None)
 
+    role_key = _role_key(user.role)
     role_redirects = {
-        "SuperAdmin": "admin.dashboard",
-        "HR": "hr.dashboard_hr",
-        "OpsCoordinator": "ops_coordinator.dashboard_ops_coordinator",
-        "OpsManager": "ops_manager.dashboard_ops",
-        "OpsSupervisor": "ops_supervisor.dashboard_ops_supervisor",
-        "FleetManager": "fleet.dashboard_fleet",
-        "FinanceManager": "finance.dashboard_finance",
+        "superadmin": "admin.dashboard",
+        "hr": "hr.dashboard_hr",
+        "opscoordinator": "ops_coordinator.dashboard_ops_coordinator",
+        "opsmanager": "ops_manager.dashboard_ops",
+        "opssupervisor": "ops_supervisor.dashboard_ops_supervisor",
+        "fleetmanager": "fleet.dashboard_fleet",
+        "financemanager": "finance.dashboard_finance",
     }
 
+    target = role_redirects.get(role_key)
+    if not target:
+        current_app.logger.warning(
+            "login_role_unmapped_otp", extra={"user": user.username, "role": user.role}
+        )
+        flash("Role is not configured for redirect.", "warning")
+        return render_template("login.html")
+
+    current_app.logger.info(
+        "login_redirect_otp", extra={"user": user.username, "role": user.role, "target": target}
+    )
     flash("Login successful!", "success")
-    return redirect(url_for(role_redirects.get(user.role, "auth.login")))
+    return redirect(url_for(target))
 
 
 def _json_or_html(payload, status=200):

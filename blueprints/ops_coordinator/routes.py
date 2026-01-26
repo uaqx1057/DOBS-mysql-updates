@@ -1,33 +1,24 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, session
 from flask_login import login_required, current_user
 from datetime import datetime
-from models import Driver, User , Offboarding
+from models import Driver, User
 from extensions import db, mail, limiter
 from flask_mail import Message
 from werkzeug.security import check_password_hash, generate_password_hash
 from utils.email_utils import send_password_change_email
-from sqlalchemy.orm import aliased
-from flask_wtf.csrf import validate_csrf, CSRFError
-from forms.common import CSRFOnlyForm, ChangePasswordForm, OpsCoordinatorOffboardingForm
-
+from forms.common import ChangePasswordForm, OpsCoordinatorOffboardingForm
 
 
 ops_coordinator_bp = Blueprint("ops_coordinator", __name__)
 
 
-def _validate_csrf():
-    """Validate CSRF token from form or X-CSRFToken header."""
-    header_token = request.headers.get("X-CSRFToken")
-    if header_token:
-        try:
-            validate_csrf(header_token)
-            return True
-        except CSRFError as exc:
-            current_app.logger.warning("[OPS_COORDINATOR] Header CSRF failed: %s", exc)
-            return False
+def _role_key(role_raw: str) -> str:
+    return "".join(ch for ch in (role_raw or "").lower() if ch.isalnum())
 
-    form = CSRFOnlyForm()
-    return form.validate_on_submit()
+
+def _is_ops_coordinator(user) -> bool:
+    return _role_key(getattr(user, "role", "")) == "opscoordinator"
+
 
 # -------------------------
 # Dashboard - Ops Coordinator
@@ -35,18 +26,21 @@ def _validate_csrf():
 @ops_coordinator_bp.route("/dashboard")
 @login_required
 def dashboard_ops_coordinator():
-    if current_user.role != "OpsCoordinator":
+    if not _is_ops_coordinator(current_user):
+        current_app.logger.warning(
+            "[ops_coordinator] access denied: role=%s id=%s",
+            current_user.role,
+            getattr(current_user, "id", None),
+        )
         flash("Access denied. Ops Coordinator role required.", "danger")
         return redirect(url_for("auth.login"))
 
     lang = session.get("lang", "en")
 
-    # Coordinator sees only completed (onboarded) drivers
-    # Fetch drivers with completed onboarding but not in Offboarding
     completed_drivers = (
         Driver.query
         .filter(Driver.onboarding_stage == "Completed")
-        .filter(~Driver.offboarding_records.any())  # Exclude drivers present in Offboarding
+        .filter(~Driver.offboarding_records.any())
         .order_by(Driver.name.asc())
         .all()
     )
@@ -56,7 +50,7 @@ def dashboard_ops_coordinator():
     return render_template(
         template,
         completed_drivers=completed_drivers,
-        count_completed=len(completed_drivers)
+        count_completed=len(completed_drivers),
     )
 
 
@@ -67,7 +61,7 @@ def dashboard_ops_coordinator():
 @limiter.limit("20 per minute")
 @login_required
 def initiate_offboarding(driver_id):
-    if current_user.role != "OpsCoordinator":
+    if not _is_ops_coordinator(current_user):
         flash("Access denied. Ops Coordinator role required.", "danger")
         return redirect(url_for("auth.login"))
 
@@ -88,7 +82,6 @@ def initiate_offboarding(driver_id):
 
     reason = (form.reason.data or "").strip()
 
-    # Update driver record
     driver.offboard_request = True
     driver.offboard_requested_by = current_user.name or current_user.username
     driver.offboard_reason = reason or "No reason provided"
@@ -96,13 +89,12 @@ def initiate_offboarding(driver_id):
 
     try:
         db.session.commit()
-    except Exception as e:
+    except Exception:
         db.session.rollback()
         current_app.logger.exception("Failed to save offboarding request.")
         flash("An error occurred. Try again.", "danger")
         return redirect(url_for("ops_coordinator.dashboard_ops_coordinator"))
 
-    # Notify Ops Manager via email
     try:
         managers = User.query.filter_by(role="OpsManager").all()
         recipients = [m.email for m in managers if m.email]
@@ -112,18 +104,17 @@ def initiate_offboarding(driver_id):
             coordinator_name = current_user.name or current_user.username
             reason_text = reason or "No reason provided."
             driver_city = driver.city or "N/A"
-        
+
             msg = Message(
                 subject="Offboarding Request Submitted | تم تقديم طلب الخروج",
-                recipients=recipients
+                recipients=recipients,
             )
-        
+
             msg.html = f"""
             <html>
             <body style="font-family: Arial, sans-serif; color: #333; background-color: #f8f9fa; padding: 20px;">
                 <div style="max-width: 600px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.1);">
-        
-                    <!-- English LTR -->
+
                     <div style="text-align: left;">
                         <h2 style="color: #004aad;">Driver Onboarding System</h2>
                         <p>Dear Ops Manager,</p>
@@ -152,10 +143,9 @@ def initiate_offboarding(driver_id):
                         </table>
                         <p><a href="https://dobs.dobs.cloud/login">Login to the system</a></p>
                     </div>
-        
+
                     <hr style="margin: 30px 0;">
-        
-                    <!-- Arabic RTL -->
+
                     <div dir="rtl" lang="ar" style="text-align: right; font-family: Tahoma, sans-serif;">
                         <h2 style="color: #004aad;">نظام إدخال السائقين</h2>
                         <p>عزيزي مدير العمليات،</p>
@@ -184,13 +174,13 @@ def initiate_offboarding(driver_id):
                         </table>
                         <p><a href="https://dobs.dobs.cloud/login">تسجيل الدخول إلى النظام</a></p>
                     </div>
-        
+
                 </div>
             </body>
             </html>
             """
             mail.send(msg)
-    except Exception as e:
+    except Exception:
         current_app.logger.exception("Email notification failed.")
         flash("Offboarding request saved but email could not be sent.", "warning")
 
@@ -198,14 +188,14 @@ def initiate_offboarding(driver_id):
     return redirect(url_for("ops_coordinator.dashboard_ops_coordinator"))
 
 
-# ------------------------- 
+# -------------------------
 # Change Password
 # -------------------------
 @ops_coordinator_bp.route("/change_password", methods=["POST"])
 @limiter.limit("5 per minute")
 @login_required
 def change_password():
-    if current_user.role != "OpsCoordinator":
+    if not _is_ops_coordinator(current_user):
         flash("Access denied. Ops Coordinator role required.", "danger")
         return redirect(url_for("auth.login"))
 

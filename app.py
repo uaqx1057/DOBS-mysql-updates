@@ -4,6 +4,9 @@ import time
 import json
 import logging
 import uuid
+import importlib.util
+from limits.errors import ConfigurationError
+from typing import TYPE_CHECKING
 from sqlalchemy import event
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -56,25 +59,41 @@ def create_app():
     default_limits_raw = app.config.get("RATELIMIT_DEFAULTS")
     if default_limits_raw:
         app.config["RATELIMIT_DEFAULT"] = default_limits_raw
-    storage_uri = app.config.get("RATELIMIT_STORAGE_URI")
-    if storage_uri:
-        app.config["RATELIMIT_STORAGE_URI"] = storage_uri
+
+    # Force in-memory rate limiting on this host to avoid redis prerequisite issues.
+    storage_uri = "memory://"
+    for key in [
+        "RATELIMIT_STORAGE_URI",
+        "RATELIMIT_STORAGE_URL",
+        "RATELIMIT_STORAGE",
+        "FLASK_LIMITER_STORAGE_URI",
+        "FLASK_LIMITER_STORAGE_URL",
+    ]:
+        os.environ.pop(key, None)
+        app.config[key] = storage_uri
+
+    # Hard override the limiter instance to avoid any env-driven redis config.
+    limiter._storage_uri = storage_uri  # type: ignore[attr-defined]
+    limiter._storage_options = {}
     limiter.init_app(app)
 
     # --- Sentry (optional) ---
     if os.getenv("SENTRY_DSN"):
-        try:
-            import sentry_sdk
-            from sentry_sdk.integrations.flask import FlaskIntegration
+        if importlib.util.find_spec("sentry_sdk"):
+            try:
+                import sentry_sdk  # type: ignore
+                from sentry_sdk.integrations.flask import FlaskIntegration  # type: ignore
 
-            sentry_sdk.init(
-                dsn=os.getenv("SENTRY_DSN"),
-                integrations=[FlaskIntegration()],
-                environment=os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "production",
-                traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
-            )
-        except Exception:  # pragma: no cover
-            app.logger.exception("Failed to initialize Sentry")
+                sentry_sdk.init(
+                    dsn=os.getenv("SENTRY_DSN"),
+                    integrations=[FlaskIntegration()],
+                    environment=os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "production",
+                    traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+                )
+            except Exception:  # pragma: no cover
+                app.logger.exception("Failed to initialize Sentry")
+        else:
+            app.logger.warning("Sentry SDK not installed; skipping Sentry initialization")
 
     # --- Slow query logging ---
     slow_threshold_ms = app.config.get("SLOW_QUERY_MS", 500)

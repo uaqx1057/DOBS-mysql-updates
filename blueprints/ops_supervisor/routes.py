@@ -142,9 +142,10 @@ def approve_driver(driver_id):
         # -------------------------
         # Update DriverBusinessIDS (history table)
         # -------------------------
-        old_links = DriverBusinessIDS.query.filter_by(driver_id=driver.id, transferred_at=None).all()
-        for old in old_links:
-            old.transferred_at = datetime.utcnow()
+        DriverBusinessIDS.query.filter_by(
+            driver_id=driver.id,
+            transferred_at=None
+        ).update({"transferred_at": datetime.utcnow()}, synchronize_session=False)
 
         # Insert new DriverBusinessIDS records
         for bid in platform_ids:
@@ -371,7 +372,8 @@ def api_clear_offboarding(offboarding_id):
     record = Offboarding.query.get_or_404(offboarding_id)
 
     try:
-        data = request.get_json(force=True)
+        data = request.get_json(silent=True) or {}
+        driver_name = record.driver.name if record.driver else "Driver"
 
         # Mark offboarding as cleared
         record.ops_supervisor_cleared = True
@@ -386,12 +388,10 @@ def api_clear_offboarding(offboarding_id):
         # -------------------------
         # Update driver_business_ids to mark IDs as transferred
         # -------------------------
-        driver_ids_links = DriverBusinessIDS.query.filter_by(
+        DriverBusinessIDS.query.filter_by(
             driver_id=record.driver_id,
             transferred_at=None
-        ).all()
-        for link in driver_ids_links:
-            link.transferred_at = datetime.utcnow()
+        ).update({"transferred_at": datetime.utcnow()}, synchronize_session=False)
 
         db.session.commit()
 
@@ -399,9 +399,9 @@ def api_clear_offboarding(offboarding_id):
         try:
             fleet_managers = User.query.filter_by(role="FleetManager").all()
             emails = [u.email for u in fleet_managers if u.email]
-            if emails:
+            if emails and record.driver:
                 msg = Message(
-                    subject=f"Driver Offboarding Ready for Fleet Clearance | السائق جاهز لإجراءات الأسطول: {record.driver.name}",
+                    subject=f"Driver Offboarding Ready for Fleet Clearance | السائق جاهز لإجراءات الأسطول: {driver_name}",
                     recipients=emails
                 )
                 msg.html = f"""
@@ -413,7 +413,7 @@ def api_clear_offboarding(offboarding_id):
                         <div style="text-align: left;">
                             <h2 style="color: #713183;">Driver Offboarding Ready for Fleet Clearance</h2>
                             <p>Dear Fleet Manager,</p>
-                            <p>Driver <strong>{record.driver.name}</strong> has been cleared by the Ops Supervisor and is ready for Fleet clearance processing.</p>
+                            <p>Driver <strong>{driver_name}</strong> has been cleared by the Ops Supervisor and is ready for Fleet clearance processing.</p>
                             <p>Please log in to your dashboard to continue processing: <a href="https://dobs.dobs.cloud/login" target="_blank">https://dobs.dobs.cloud/login</a></p>
                         </div>
 
@@ -423,7 +423,7 @@ def api_clear_offboarding(offboarding_id):
                         <div dir="rtl" lang="ar" style="text-align: right; font-family: Tahoma, sans-serif;">
                             <h2 style="color: #713183;">السائق جاهز لإجراءات الأسطول</h2>
                             <p>السادة مديرو الأسطول،</p>
-                            <p>تمت الموافقة على السائق <strong>{record.driver.name}</strong> من قبل مشرف العمليات وهو جاهز لإجراءات مرحلة الأسطول.</p>
+                            <p>تمت الموافقة على السائق <strong>{driver_name}</strong> من قبل مشرف العمليات وهو جاهز لإجراءات مرحلة الأسطول.</p>
                             <p>يرجى تسجيل الدخول إلى لوحة القيادة لمتابعة الإجراءات: <a href="https://dobs.dobs.cloud/login" target="_blank">https://dobs.dobs.cloud/login</a></p>
                         </div>
 
@@ -438,7 +438,7 @@ def api_clear_offboarding(offboarding_id):
 
         return {
             "success": True,
-            "driver_name": record.driver.name,
+            "driver_name": driver_name,
             "cleared_at": record.ops_supervisor_cleared_at.strftime("%Y-%m-%d %H:%M"),
             "status": record.status
         }

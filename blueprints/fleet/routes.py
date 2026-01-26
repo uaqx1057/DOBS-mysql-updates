@@ -321,7 +321,8 @@ def offboarding_action(offboarding_id):
         return jsonify({"success": False, "message": "Invalid CSRF token."}), 400
 
     record = Offboarding.query.get_or_404(offboarding_id)
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+    driver_name = record.driver.name if record.driver else "Driver"
 
     try:
         # --- Fleet Clearance ---
@@ -343,9 +344,9 @@ def offboarding_action(offboarding_id):
 
             # Notify HR/Admin
             recipients = [u.email for u in User.query.filter(User.role.in_(["HR", "Admin"])).all() if u.email]
-            if recipients:
+            if recipients and record.driver:
                 msg = Message(
-                    subject=f"Driver Fully Offboarded | اكتمال خروج السائق: {record.driver.name}",
+                    subject=f"Driver Fully Offboarded | اكتمال خروج السائق: {driver_name}",
                     recipients=recipients
                 )
 
@@ -358,7 +359,7 @@ def offboarding_action(offboarding_id):
                         <div style="text-align: left;">
                             <h2 style="color: #713183;">Driver Fully Offboarded</h2>
                             <p>Dear HR / Admin Team,</p>
-                            <p>Driver <strong>{record.driver.name}</strong> (Iqama: <strong>{record.driver.iqaama_number or "N/A"}</strong>) has been fully offboarded.</p>
+                            <p>Driver <strong>{driver_name}</strong> (Iqama: <strong>{record.driver.iqaama_number or "N/A"}</strong>) has been fully offboarded.</p>
                             <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;"><strong>Offboarding Completed At</strong></td>
@@ -379,7 +380,7 @@ def offboarding_action(offboarding_id):
                         <div dir="rtl" lang="ar" style="text-align: right; font-family: Tahoma, sans-serif;">
                             <h2 style="color: #713183;">اكتمال خروج السائق</h2>
                             <p>السادة فريق الموارد البشرية / الإدارة،</p>
-                            <p>تم إتمام خروج السائق <strong>{record.driver.name}</strong> (رقم الإقامة: <strong>{record.driver.iqaama_number or "N/A"}</strong>).</p>
+                            <p>تم إتمام خروج السائق <strong>{driver_name}</strong> (رقم الإقامة: <strong>{record.driver.iqaama_number or "N/A"}</strong>).</p>
                             <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;">تاريخ إتمام الخروج</td>
@@ -403,11 +404,14 @@ def offboarding_action(offboarding_id):
                 </html>
                 """
 
-                mail.send(msg)
+                try:
+                    mail.send(msg)
+                except Exception as mail_err:
+                    current_app.logger.error(f"[FLEET] HR/Admin notification email failed: {mail_err}")
 
 
 
-            return jsonify({"success": True, "message": f"Driver {record.driver.name} fully offboarded."})
+            return jsonify({"success": True, "message": f"Driver {driver_name} fully offboarded."})
 
         else:
             # Send to FinanceManager
@@ -417,9 +421,9 @@ def offboarding_action(offboarding_id):
             # Notify Finance
             finance_users = User.query.filter(User.role.in_(["FinanceManager", "Finance"])).all()
             emails = [f.email for f in finance_users if f.email]
-            if emails:
+            if emails and record.driver:
                 msg = Message(
-                    subject=f"Driver Sent to Finance Manager | تحويل السائق إلى المالية: {record.driver.name}",
+                    subject=f"Driver Sent to Finance Manager | تحويل السائق إلى المالية: {driver_name}",
                     recipients=emails
                 )
 
@@ -432,7 +436,7 @@ def offboarding_action(offboarding_id):
                         <div style="text-align: left;">
                             <h2 style="color: #713183;">Driver Sent to Finance Manager</h2>
                             <p>Dear Finance Team,</p>
-                            <p>Driver <strong>{record.driver.name}</strong> (Iqama: <strong>{record.driver.iqaama_number or "N/A"}</strong>) has been cleared by the Fleet Manager.</p>
+                            <p>Driver <strong>{driver_name}</strong> (Iqama: <strong>{record.driver.iqaama_number or "N/A"}</strong>) has been cleared by the Fleet Manager.</p>
                             <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;"><strong>Fleet Damage Report</strong></td>
@@ -457,7 +461,7 @@ def offboarding_action(offboarding_id):
                         <div dir="rtl" lang="ar" style="text-align: right; font-family: Tahoma, sans-serif;">
                             <h2 style="color: #713183;">تم تحويل السائق إلى المالية</h2>
                             <p>السادة فريق المالية،</p>
-                            <p>تمت الموافقة على السائق <strong>{record.driver.name}</strong> (رقم الإقامة: <strong>{record.driver.iqaama_number or "N/A"}</strong>) من قبل مدير الأسطول.</p>
+                            <p>تمت الموافقة على السائق <strong>{driver_name}</strong> (رقم الإقامة: <strong>{record.driver.iqaama_number or "N/A"}</strong>) من قبل مدير الأسطول.</p>
                             <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;">تقرير أضرار الأسطول</td>
@@ -485,13 +489,16 @@ def offboarding_action(offboarding_id):
                 </html>
                 """
 
-                mail.send(msg)
+                try:
+                    mail.send(msg)
+                except Exception as mail_err:
+                    current_app.logger.error(f"[FLEET] Finance notification email failed: {mail_err}")
 
 
 
             return jsonify({
                 "success": True,
-                "message": f"Driver {record.driver.name} cleared by Fleet and sent to Finance Manager.",
+                "message": f"Driver {driver_name} cleared by Fleet and sent to Finance Manager.",
                 "cleared_at": record.fleet_cleared_at.strftime("%Y-%m-%d %H:%M"),
                 "damage_cost": record.fleet_damage_cost,
                 "damage_report": record.fleet_damage_report,
