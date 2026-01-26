@@ -1,7 +1,8 @@
-from flask import Blueprint, render_template, request, send_file, flash
+from flask import Blueprint, render_template, request, send_file, flash, current_app
 from datetime import datetime
 from io import BytesIO
 import csv
+import os
 from extensions import db
 from models import Driver, Offboarding
 from flask_login import login_required
@@ -10,6 +11,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from io import StringIO
 from flask import Response
 from forms.common import ReportsFilterForm
@@ -63,6 +66,42 @@ def _format_platform_assignments(driver):
         return str(fallback_platform_id)
 
     return ""
+
+
+def _register_unicode_font():
+    """Try to register a Unicode-capable font for ReportLab.
+
+    Returns the font name if registered, else None.
+    """
+
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/ttf/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
+    ]
+
+    for path in candidates:
+        if os.path.isfile(path):
+            try:
+                font_name = "UnicodeSans"
+                if font_name not in pdfmetrics.getRegisteredFontNames():
+                    pdfmetrics.registerFont(TTFont(font_name, path))
+                return font_name
+            except Exception:
+                continue
+
+    return None
+
+
+def _safe_pdf_text(value, allow_unicode: bool):
+    if value is None:
+        return ""
+    text = str(value)
+    if allow_unicode:
+        return text
+    return text.encode("latin-1", "replace").decode("latin-1")
 
 # ------------------------
 # Filter function
@@ -318,79 +357,84 @@ def export_csv():
 @login_required
 @roles_required("SuperAdmin", "HR")
 def export_pdf():
-    drivers = get_filtered_drivers(
-        request.args.get("report_type"),
-        request.args.get("start_date"),
-        request.args.get("end_date"),
-        request.args.get("city"),
-        request.args.get("transfer_status")
-    )
-
-    def safe_get(obj, *names, default=""):
-        """Return first existing attr from names without raising AttributeError."""
-        for name in names:
-            try:
-                val = getattr(obj, name)
-            except AttributeError:
-                continue
-            if val is not None:
-                return val
-        return default
-
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4)
-    styles = getSampleStyleSheet()
-    elements = []
-
-    # Title
-    elements.append(Paragraph("Driver Report", styles.get("Title", styles["Normal"])))
-    elements.append(Spacer(1, 12))
-
-    # Table header
-    data = [["Full Name", "Iqama Number", "City", "Platform", "Assignment Date", "Transfer Done", "Stage"]]
-
-    # Table rows (defensive attribute access)
-    for d in drivers:
-        full_name = safe_get(d, "name", "full_name", default="N/A") or "N/A"
-        iqama_number = safe_get(d, "iqama_number", "iqaama_number", default="N/A") or "N/A"
-        city = safe_get(d, "city") or ""
-        assignment_date = safe_get(d, "assignment_date")
-        assignment_date_str = assignment_date.strftime("%Y-%m-%d") if assignment_date else ""
-        transfer_status = safe_get(d, "sponsorship_transfer_status", default="Pending") or "Pending"
-        stage = safe_get(d, "onboarding_stage") or ""
-        platform_label = _format_platform_assignments(d)
-
-        data.append([full_name, iqama_number, city, platform_label, assignment_date_str, transfer_status, stage])
-
-    # Create table
-    table = Table(data, repeatRows=1)
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#4a90e2")),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("ALIGN", (0,0), (-1,-1), "CENTER"),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("FONTSIZE", (0,0), (-1,0), 10),
-        ("BOTTOMPADDING", (0,0), (-1,0), 12),
-        ("BACKGROUND", (0,1), (-1,-1), colors.whitesmoke),
-        ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
-    ]))
-
-    elements.append(table)
-
-    # Build PDF
     try:
-        doc.build(elements)
-    except Exception as e:
-        # Optional: log error
-        print("PDF generation error:", e)
-        return "Error generating PDF", 500
+        drivers = get_filtered_drivers(
+            request.args.get("report_type"),
+            request.args.get("start_date"),
+            request.args.get("end_date"),
+            request.args.get("city"),
+            request.args.get("transfer_status")
+        )
 
-    buffer.seek(0)
+        def safe_get(obj, *names, default=""):
+            """Return first existing attr from names without raising AttributeError."""
+            for name in names:
+                try:
+                    val = getattr(obj, name)
+                except AttributeError:
+                    continue
+                if val is not None:
+                    return val
+            return default
 
-    return send_file(
-        buffer,
-        mimetype="application/pdf",
-        as_attachment=True,
-        download_name="drivers_report.pdf",
-        max_age=0
-    )
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        styles = getSampleStyleSheet()
+        elements = []
+
+        unicode_font = _register_unicode_font()
+        allow_unicode = unicode_font is not None
+
+        # Title
+        elements.append(Paragraph("Driver Report", styles.get("Title", styles["Normal"])))
+        elements.append(Spacer(1, 12))
+
+        # Table header
+        data = [["Full Name", "Iqama Number", "City", "Platform", "Assignment Date", "Transfer Done", "Stage"]]
+
+        # Table rows (defensive attribute access)
+        for d in drivers:
+            full_name = _safe_pdf_text(safe_get(d, "name", "full_name", default="N/A") or "N/A", allow_unicode)
+            iqama_number = _safe_pdf_text(safe_get(d, "iqama_number", "iqaama_number", default="N/A") or "N/A", allow_unicode)
+            city = _safe_pdf_text(safe_get(d, "city") or "", allow_unicode)
+            assignment_date = safe_get(d, "assignment_date")
+            assignment_date_str = assignment_date.strftime("%Y-%m-%d") if assignment_date else ""
+            transfer_status = _safe_pdf_text(safe_get(d, "sponsorship_transfer_status", default="Pending") or "Pending", allow_unicode)
+            stage = _safe_pdf_text(safe_get(d, "onboarding_stage") or "", allow_unicode)
+            platform_label = _safe_pdf_text(_format_platform_assignments(d), allow_unicode)
+
+            data.append([full_name, iqama_number, city, platform_label, assignment_date_str, transfer_status, stage])
+
+        # Create table
+        table = Table(data, repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#4a90e2")),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("ALIGN", (0,0), (-1,-1), "CENTER"),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTNAME", (0,1), (-1,-1), unicode_font or "Helvetica"),
+            ("FONTSIZE", (0,0), (-1,0), 10),
+            ("BOTTOMPADDING", (0,0), (-1,0), 12),
+            ("BACKGROUND", (0,1), (-1,-1), colors.whitesmoke),
+            ("GRID", (0,0), (-1,-1), 0.5, colors.grey),
+        ]))
+
+        elements.append(table)
+
+        # Build PDF
+        try:
+            doc.build(elements)
+        except Exception as exc:
+            current_app.logger.exception("PDF generation error")
+            return f"PDF build error: {exc}", 500
+
+        buffer.seek(0)
+        pdf_bytes = buffer.getvalue()
+
+        return Response(
+            pdf_bytes,
+            mimetype="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=drivers_report.pdf"}
+        )
+    except Exception as exc:
+        return f"PDF export error: {exc}", 500

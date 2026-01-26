@@ -375,15 +375,17 @@ def api_clear_offboarding(offboarding_id):
         data = request.get_json(silent=True) or {}
         driver_name = record.driver.name if record.driver else "Driver"
 
-        # Mark offboarding as cleared
-        record.ops_supervisor_cleared = True
-        record.ops_supervisor_cleared_at = datetime.utcnow()
-        record.company_mobile_returned = bool(data.get("company_mobile_returned"))
-        record.company_sim_returned = bool(data.get("company_sim_returned"))
-        record.platform_returned = bool(data.get("platform_returned"))
-        record.ops_supervisor_note = data.get("ops_supervisor_note", "")
-        record.ops_supervisor_id = current_user.id
-        record.status = "Fleet"
+        cleared_at = datetime.utcnow()
+        update_values = {
+            "ops_supervisor_cleared": True,
+            "ops_supervisor_cleared_at": cleared_at,
+            "company_mobile_returned": bool(data.get("company_mobile_returned")),
+            "company_sim_returned": bool(data.get("company_sim_returned")),
+            "platform_returned": bool(data.get("platform_returned")),
+            "ops_supervisor_note": data.get("ops_supervisor_note", ""),
+            "ops_supervisor_id": current_user.id,
+            "status": "Fleet",
+        }
 
         # -------------------------
         # Update driver_business_ids to mark IDs as transferred
@@ -393,6 +395,7 @@ def api_clear_offboarding(offboarding_id):
             transferred_at=None
         ).update({"transferred_at": datetime.utcnow()}, synchronize_session=False)
 
+        Offboarding.query.filter_by(id=record.id).update(update_values, synchronize_session=False)
         db.session.commit()
 
         # Notify Fleet Managers
@@ -439,8 +442,8 @@ def api_clear_offboarding(offboarding_id):
         return {
             "success": True,
             "driver_name": driver_name,
-            "cleared_at": record.ops_supervisor_cleared_at.strftime("%Y-%m-%d %H:%M"),
-            "status": record.status
+            "cleared_at": cleared_at.strftime("%Y-%m-%d %H:%M"),
+            "status": update_values["status"],
         }
 
     except Exception as e:

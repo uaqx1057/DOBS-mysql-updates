@@ -325,21 +325,29 @@ def offboarding_action(offboarding_id):
     driver_name = record.driver.name if record.driver else "Driver"
 
     try:
-        # --- Fleet Clearance ---
-        record.fleet_cleared = True
-        record.fleet_cleared_at = datetime.utcnow()
-        record.fleet_damage_report = data.get("fleet_damage_report")
-        record.fleet_damage_cost = float(data.get("fleet_damage_cost") or 0)
+        now = datetime.utcnow()
+        fleet_damage_report = data.get("fleet_damage_report")
+        fleet_damage_cost = float(data.get("fleet_damage_cost") or 0)
+        tamm_revoked = bool(data.get("tamm_revoked")) or bool(record.tamm_revoked)
+        tamm_revoked_at = now if data.get("tamm_revoked") else record.tamm_revoked_at
 
-        # --- TAMM Revocation ---
-        if data.get("tamm_revoked"):
-            record.tamm_revoked = True
-            record.tamm_revoked_at = datetime.utcnow()
+        base_updates = {
+            "fleet_cleared": True,
+            "fleet_cleared_at": now,
+            "fleet_damage_report": fleet_damage_report,
+            "fleet_damage_cost": fleet_damage_cost,
+            "tamm_revoked": tamm_revoked,
+            "tamm_revoked_at": tamm_revoked_at,
+        }
 
         # --- Determine next stage ---
         if data.get("finalize") and data.get("finance_cleared"):
             # Finance has cleared → Completed
-            record.status = "Finance"
+            status = "Finance"
+            Offboarding.query.filter_by(id=record.id).update(
+                {**base_updates, "status": status},
+                synchronize_session=False,
+            )
             db.session.commit()
 
             # Notify HR/Admin
@@ -367,7 +375,7 @@ def offboarding_action(offboarding_id):
                                 </tr>
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;"><strong>TAMM Revoked At</strong></td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{record.tamm_revoked_at.strftime('%Y-%m-%d %H:%M') if record.tamm_revoked_at else 'N/A'}</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">{tamm_revoked_at.strftime('%Y-%m-%d %H:%M') if tamm_revoked_at else 'N/A'}</td>
                                 </tr>
                             </table>
                             <p>Please update your records accordingly.</p>
@@ -388,7 +396,7 @@ def offboarding_action(offboarding_id):
                                 </tr>
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;">تاريخ إلغاء صلاحية TAMM</td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{record.tamm_revoked_at.strftime('%Y-%m-%d %H:%M') if record.tamm_revoked_at else 'N/A'}</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">{tamm_revoked_at.strftime('%Y-%m-%d %H:%M') if tamm_revoked_at else 'N/A'}</td>
                                 </tr>
                             </table>
                             <p>يرجى تحديث سجلاتكم حسب ذلك.</p>
@@ -415,7 +423,11 @@ def offboarding_action(offboarding_id):
 
         else:
             # Send to FinanceManager
-            record.status = "Finance"
+            status = "Finance"
+            Offboarding.query.filter_by(id=record.id).update(
+                {**base_updates, "status": status},
+                synchronize_session=False,
+            )
             db.session.commit()
 
             # Notify Finance
@@ -440,15 +452,15 @@ def offboarding_action(offboarding_id):
                             <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;"><strong>Fleet Damage Report</strong></td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{record.fleet_damage_report or "N/A"}</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_report or "N/A"}</td>
                                 </tr>
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;"><strong>Damage Cost</strong></td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{record.fleet_damage_cost or 0} SAR</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_cost or 0} SAR</td>
                                 </tr>
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;"><strong>TAMM Revoked</strong></td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{"Yes" if record.tamm_revoked else "No"}</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">{"Yes" if tamm_revoked else "No"}</td>
                                 </tr>
                             </table>
                             <p>Please proceed with the settlement.</p>
@@ -465,15 +477,15 @@ def offboarding_action(offboarding_id):
                             <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;">تقرير أضرار الأسطول</td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{record.fleet_damage_report or "N/A"}</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_report or "N/A"}</td>
                                 </tr>
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;">تكلفة الأضرار</td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{record.fleet_damage_cost or 0} ريال سعودي</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_cost or 0} ريال سعودي</td>
                                 </tr>
                                 <tr>
                                     <td style="padding: 8px; border: 1px solid #ddd;">إلغاء صلاحية TAMM</td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{"نعم" if record.tamm_revoked else "لا"}</td>
+                                    <td style="padding: 8px; border: 1px solid #ddd;">{"نعم" if tamm_revoked else "لا"}</td>
                                 </tr>
                             </table>
                             <p>يرجى متابعة التسوية حسب الإجراءات.</p>
@@ -499,10 +511,10 @@ def offboarding_action(offboarding_id):
             return jsonify({
                 "success": True,
                 "message": f"Driver {driver_name} cleared by Fleet and sent to Finance Manager.",
-                "cleared_at": record.fleet_cleared_at.strftime("%Y-%m-%d %H:%M"),
-                "damage_cost": record.fleet_damage_cost,
-                "damage_report": record.fleet_damage_report,
-                "tamm_revoked_at": record.tamm_revoked_at.strftime("%Y-%m-%d %H:%M") if record.tamm_revoked else None
+                "cleared_at": now.strftime("%Y-%m-%d %H:%M"),
+                "damage_cost": fleet_damage_cost,
+                "damage_report": fleet_damage_report,
+                "tamm_revoked_at": tamm_revoked_at.strftime("%Y-%m-%d %H:%M") if tamm_revoked_at else None
             })
 
     except Exception as e:
