@@ -426,7 +426,7 @@ def export_pdf():
             doc.build(elements)
         except Exception as exc:
             current_app.logger.exception("PDF generation error")
-            return f"PDF build error: {exc}", 500
+            return "Error generating PDF", 500
 
         buffer.seek(0)
         pdf_bytes = buffer.getvalue()
@@ -437,4 +437,5 @@ def export_pdf():
             headers={"Content-Disposition": "attachment; filename=drivers_report.pdf"}
         )
     except Exception as exc:
-        return f"PDF export error: {exc}", 500
+        current_app.logger.exception("PDF export error")
+        return "Error generating PDF", 500
