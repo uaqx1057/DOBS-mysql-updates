@@ -229,10 +229,12 @@ def dashboard():
         for o in completed_offboarding_records
         if o.driver is not None
     ]
+    # Build the fully-onboarded list from all drivers (not just the current page)
+    completed_drivers = Driver.query.filter(Driver.onboarding_stage == "Completed").order_by(Driver.id.desc()).all()
     fully_onboarded_only = [
-        serialize_driver(d) 
-        for d in drivers 
-        if d.onboarding_stage == "Completed" and d.id not in in_offboarding_ids
+        serialize_driver(d)
+        for d in completed_drivers
+        if d.id not in in_offboarding_ids
     ]
 
     # -------------------------
