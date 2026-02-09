@@ -670,8 +670,9 @@ function openViewModal(e) {
 
     // Images
     html += '<div class="image-row">';
-    if (d.iqama_card_upload) {
-      html += `<div><label class="small">بطاقة إقامة</label><br><img src="/static/uploads/${encodeURIComponent(d.iqama_card_upload)}" alt="iqama"></div>`;
+    const iqamaUrl = d.iqama_card_upload_url || (d.iqama_card_upload ? `/static/uploads/${encodeURIComponent(d.iqama_card_upload)}` : '');
+    if (iqamaUrl) {
+      html += `<div><label class="small">بطاقة إقامة</label><br><img src="${iqamaUrl}" alt="iqama"></div>`;
     }
     if (d.tamm_authorization_ss) {
       html += `<div><label class="small">لقطة شاشة TAMM</label><br><img src="/static/uploads/${encodeURIComponent(d.tamm_authorization_ss)}" alt="tamm"></div>`;
@@ -1226,6 +1227,9 @@ function openViewModal(e) {
           container.appendChild(row);
         }
 
+        const adminBase = "{{ url_for('admin.dashboard') }}";
+        const adminBaseUrl = adminBase.endsWith('/') ? adminBase : `${adminBase}/`;
+
         // Open modal and populate fields
         function openEditModal(e, btn) {
           e.stopPropagation();
@@ -1285,7 +1289,7 @@ function openViewModal(e) {
           showFileLink('edit_qiwa_contract_link', d.qiwa_contract_file_url);
 
           // Set form action
-          document.getElementById('editForm').action = `/dashboard/driver/${d.id}/update`;
+          document.getElementById('editForm').action = `${adminBaseUrl}driver/${d.id}/update`;
         }
         </script>
 

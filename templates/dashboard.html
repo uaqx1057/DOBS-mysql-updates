@@ -746,8 +746,9 @@ function openViewModal(e) {
 
     // Images
     html += '<div class="image-row">';
-    if (d.iqama_card_upload) {
-      html += `<div><label class="small">Iqama card</label><br><img src="/static/uploads/${encodeURIComponent(d.iqama_card_upload)}" alt="iqama"></div>`;
+    const iqamaUrl = d.iqama_card_upload_url || (d.iqama_card_upload ? `/static/uploads/${encodeURIComponent(d.iqama_card_upload)}` : '');
+    if (iqamaUrl) {
+      html += `<div><label class="small">Iqama card</label><br><img src="${iqamaUrl}" alt="iqama"></div>`;
     }
     if (d.tamm_authorization_ss) {
       html += `<div><label class="small">TAMM screenshot</label><br><img src="/static/uploads/${encodeURIComponent(d.tamm_authorization_ss)}" alt="tamm"></div>`;
@@ -1446,14 +1447,25 @@ function openAddModal() {
 // ----------------------
 // Open / Populate Modal
 // ----------------------
+const adminBase = "{{ url_for('admin.dashboard') }}";
+const adminBaseUrl = adminBase.endsWith('/') ? adminBase : `${adminBase}/`;
+
 function openEditModal(driverId) {
-  fetch(`/admin/driver/${driverId}/json`)
-        .then(res => res.json())
+  fetch(`${adminBaseUrl}driver/${driverId}/json`)
+        .then(res => {
+          if (!res.ok) {
+            throw new Error(`Request failed: ${res.status}`);
+          }
+          return res.json();
+        })
         .then(d => {
             populateEditForm(d);
             document.getElementById('editModal').classList.add('show');
         })
-        .catch(err => console.error(err));
+        .catch(err => {
+          console.error(err);
+          showToast('Unable to open edit form. Please refresh and try again.', 'error');
+        });
 }
 
 function populateEditForm(d) {
@@ -1501,7 +1513,7 @@ function populateEditForm(d) {
     showFile('edit_qiwa_contract_link', d.qiwa_contract_file_url);
 
     // Form action
-    document.getElementById('editForm').action = `/admin/driver/${d.id}/update`;
+    document.getElementById('editForm').action = `${adminBaseUrl}driver/${d.id}/update`;
 }
 
 // Close modal

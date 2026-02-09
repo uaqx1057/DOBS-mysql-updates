@@ -146,6 +146,8 @@ def dashboard():
             "nationality": d.nationality,
             "absher_number": d.absher_number,
             "previous_sponsor_number": d.previous_sponsor_number,
+            "iqama_card_upload": d.iqama_card_upload,
+            "iqama_card_upload_url": url_for("static", filename=f"uploads/{d.iqama_card_upload}") if d.iqama_card_upload else "",
             "saudi_driving_license": bool(d.saudi_driving_license),
             "city": d.city,
             "car_details": d.car_details,
@@ -301,7 +303,7 @@ def driver_json(driver_id):
     driver = Driver.query.get_or_404(driver_id)
 
     assigned = []
-    for bd in driver.business_drivers:
+    for bd in driver.business_links:
         assigned.append({
             "business_id": bd.business_id,
             "platform_id": getattr(bd, "platform_id", None)
@@ -315,6 +317,7 @@ def driver_json(driver_id):
         "nationality": driver.nationality,
         "absher_number": driver.absher_number,
         "previous_sponsor_number": driver.previous_sponsor_number,
+        "iqama_card_upload": driver.iqama_card_upload,
         "saudi_driving_license": driver.saudi_driving_license,
         "assigned_businesses": assigned,
         "issued_mobile_number": driver.issued_mobile_number,
@@ -329,6 +332,7 @@ def driver_json(driver_id):
         "qiwa_contract_status": driver.qiwa_contract_status,
         "onboarding_stage": driver.onboarding_stage,
         # file URLs
+        "iqama_card_upload_url": url_for("static", filename=f"uploads/{driver.iqama_card_upload}") if driver.iqama_card_upload else "",
         "tamm_authorization_ss_url": getattr(driver, "tamm_authorization_ss_url", ""),
         "transfer_fee_receipt_url": getattr(driver, "transfer_fee_receipt_url", ""),
         "sponsorship_transfer_proof_url": getattr(driver, "sponsorship_transfer_proof_url", ""),
