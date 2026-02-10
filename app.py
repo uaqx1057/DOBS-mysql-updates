@@ -13,6 +13,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, send_from_directory, session, redirect, url_for, request, make_response, g
 from flask_limiter.errors import RateLimitExceeded
+from flask_login import logout_user
+from flask_wtf.csrf import CSRFError
 from config import Config
 from extensions import db, mail, login_manager, migrate, csrf, babel, limiter
 # Ensure models are registered with SQLAlchemy metadata for migrations
@@ -196,6 +198,15 @@ def create_app():
         if request.accept_mimetypes.best == "application/json":
             return {"message": "Too many requests. Please slow down."}, 429
         return "Too many requests. Please slow down.", 429
+
+    @app.errorhandler(CSRFError)
+    def handle_csrf_error(exc):
+        app.logger.info(
+            "CSRF error", extra={"path": request.path, "endpoint": request.endpoint, "reason": getattr(exc, "description", "")}
+        )
+        logout_user()
+        session.clear()
+        return redirect(url_for("auth.login"))
 
     @app.context_processor
     def inject_lang():

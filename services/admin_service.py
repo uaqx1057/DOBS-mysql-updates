@@ -124,7 +124,25 @@ def update_user_from_form(user: User, username: str, name: str, designation: str
     return user
 
 
-def delete_user(user: User):
+def delete_user(user: User, acting_user_id: int | None = None):
+    """Delete a user safely by reassigning required references.
+
+    Offboarding.requested_by_id is non-nullable, so we reassign those records
+    to the acting user before deletion.
+    """
+    if acting_user_id is None:
+        raise ValueError("acting_user_id is required to delete a user safely")
+
+    # Reassign offboarding requests to the acting user
+    Offboarding.query.filter(Offboarding.requested_by_id == user.id).update(
+        {Offboarding.requested_by_id: acting_user_id}, synchronize_session=False
+    )
+
+    # Clear HR approvals linked to this user (nullable)
+    Driver.query.filter(Driver.hr_approved_by == user.id).update(
+        {Driver.hr_approved_by: None}, synchronize_session=False
+    )
+
     db.session.delete(user)
     db.session.commit()
 

@@ -615,7 +615,7 @@ def delete_user(user_id):
 
     user = User.query.get_or_404(user_id)
     try:
-        delete_user_service(user)
+        delete_user_service(user, acting_user_id=current_user.id)
         flash(f"User {user.username} deleted successfully.", "success")
     except Exception as e:
         db.session.rollback()
