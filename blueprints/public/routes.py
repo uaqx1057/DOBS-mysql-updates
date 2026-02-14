@@ -128,10 +128,21 @@ def register():
             db.session.commit()
         except IntegrityError as e:
             db.session.rollback()
-            if "drivers_iqaama_number_key" in str(e.orig):
+            current_app.logger.exception("Public registration IntegrityError")
+            msg = str(getattr(e, "orig", e))
+            msg_lower = msg.lower()
+            if (
+                "iqaama" in msg_lower
+                or "iqama" in msg_lower
+                or "iqaama_number" in msg_lower
+                or "ux_drivers_iqaama_number" in msg_lower
+                or "drivers_iqaama_number" in msg_lower
+            ) and ("duplicate" in msg_lower or "unique" in msg_lower or "key" in msg_lower):
                 flash("❌ This IQAMA number already exists.", "danger")
+            elif ("driver_id" in msg_lower or "ux_drivers_driver_id" in msg_lower) and ("duplicate" in msg_lower or "unique" in msg_lower or "key" in msg_lower):
+                flash("❌ Driver ID already exists. Please try again.", "danger")
             else:
-                flash("⚠️ Unexpected error occurred. Try again.", "danger")
+                flash(f"⚠️ Unexpected error occurred: {msg}", "danger")
             return redirect(url_for("public.register"))
 
         try:
@@ -191,7 +202,10 @@ def register():
         return redirect(url_for("public.register"))
 
     if request.method == "POST":
-        flash("Please fix the highlighted errors and try again.", "danger")
+        for field, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field}: {err}", "danger")
+        current_app.logger.warning("Public registration validation failed", extra={"errors": form.errors})
 
     template = "rtl_register.html" if session.get("lang") == "ar" else "register.html"
     return render_template(template, form=form)

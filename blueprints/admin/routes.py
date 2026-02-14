@@ -356,7 +356,11 @@ def add_driver():
 
     form = AddDriverForm()
     if not form.validate_on_submit():
-        flash("Please correct the driver form.", "danger")
+        # Surface field-level errors to the UI
+        for field, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field}: {err}", "danger")
+        current_app.logger.warning("[ADMIN] Add driver validation failed", extra={"errors": form.errors})
         return redirect(url_for("admin.dashboard"))
 
     transfer_paid_at_raw = form.transfer_fee_paid_at.data
@@ -393,7 +397,9 @@ def add_driver():
         db.session.flush()
     except IntegrityError as e:
         db.session.rollback()
-        flash(f"Failed to create driver: {str(e.orig)}", "danger")
+        msg = str(getattr(e, "orig", e))
+        flash(f"Failed to create driver: {msg}", "danger")
+        current_app.logger.exception("[ADMIN] IntegrityError creating driver")
         return redirect(url_for("admin.dashboard"))
 
     business_ids = request.form.getlist("business_id[]")
@@ -406,7 +412,7 @@ def add_driver():
         flash(f"✅ Driver {driver.name} created successfully.", "success")
     except Exception as e:
         db.session.rollback()
-        current_app.logger.exception("Error creating driver")
+        current_app.logger.exception("[ADMIN] Error creating driver")
         flash(f"❌ Error creating driver: {str(e)}", "danger")
 
     return redirect(url_for("admin.dashboard"))
