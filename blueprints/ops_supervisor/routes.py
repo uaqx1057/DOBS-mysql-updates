@@ -142,17 +142,43 @@ def approve_driver(driver_id):
         # -------------------------
         # Update DriverBusinessIDS (history table)
         # -------------------------
-        DriverBusinessIDS.query.filter_by(
+        active_links = DriverBusinessIDS.query.filter_by(
             driver_id=driver.id,
             transferred_at=None
-        ).update({"transferred_at": datetime.utcnow()}, synchronize_session=False)
+        ).all()
+        active_id_set = {link.business_id_id for link in active_links}
+        new_id_set = {int(b) for b in platform_ids}
 
-        # Insert new DriverBusinessIDS records
+        # Close removed assignments for this driver
+        for link in active_links:
+            if link.business_id_id not in new_id_set:
+                link.transferred_at = datetime.utcnow()
+                BusinessDriver.query.filter_by(business_id=link.business_id_id).delete()
+
+        # Insert new assignments / reassign if needed
         for bid in platform_ids:
+            bid_int = int(bid)
+
+            # If already active for this driver, just ensure current link exists
+            if bid_int in active_id_set:
+                BusinessDriver.query.filter_by(business_id=bid_int).delete()
+                db.session.add(BusinessDriver(driver_id=driver.id, business_id=bid_int))
+                continue
+
+            existing = DriverBusinessIDS.query.filter_by(
+                business_id_id=bid_int,
+                transferred_at=None
+            ).first()
+
+            previous_driver_id = None
+            if existing and existing.driver_id != driver.id:
+                existing.transferred_at = datetime.utcnow()
+                previous_driver_id = existing.driver_id
+
             new_link = DriverBusinessIDS(
                 driver_id=driver.id,
-                business_id_id=int(bid),  # FK to BusinessID
-                previous_driver_id=None,
+                business_id_id=bid_int,  # FK to BusinessID
+                previous_driver_id=previous_driver_id,
                 assigned_at=datetime.utcnow(),
                 transferred_at=None
             )
@@ -161,9 +187,10 @@ def approve_driver(driver_id):
             # -------------------------
             # Update BusinessDriver table (simple link)
             # -------------------------
+            BusinessDriver.query.filter_by(business_id=bid_int).delete()
             business_driver = BusinessDriver(
                 driver_id=driver.id,
-                business_id=int(bid)
+                business_id=bid_int
             )
             db.session.add(business_driver)
 

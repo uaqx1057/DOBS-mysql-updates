@@ -184,14 +184,14 @@ def assign_vehicle(driver_id):
             driver_id=driver.id,
             assign_date=assignment_date,
             status="active",
-            tam_authorization=True
+            tam_authorization=bool(tamm_authorized)
         )
         db.session.add(assignment_link)
 
         assignment_report = AssignDriverReport(
             vehicle_id=vehicle.id,
             driver_id=driver.id,
-            add_date=datetime.utcnow(),
+            add_date=assignment_date,
             status="assign"
         )
         db.session.add(assignment_report)

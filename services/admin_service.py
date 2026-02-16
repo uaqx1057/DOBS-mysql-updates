@@ -62,28 +62,66 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
         else:
             setattr(driver, field, value)
 
-    # Mark old history links as transferred
-    old_links = DriverBusinessIDS.query.filter_by(driver_id=driver.id, transferred_at=None).all()
-    for old in old_links:
-        old.transferred_at = datetime.utcnow()
+    # --- Unify assignment logic with DMS ---
+    # In DMS, assignments are made by BusinessID (business_ids.id)
+    selected_business_id_ids = [int(p) for p in platform_ids if p]
 
-    # Replace active links
-    BusinessDriver.query.filter_by(driver_id=driver.id).delete()
+    # Close assignments removed from this driver
+    active_assignments = (
+        DriverBusinessIDS.query
+        .filter_by(driver_id=driver.id, transferred_at=None)
+        .all()
+    )
+    active_id_set = {a.business_id_id for a in active_assignments}
+    new_id_set = set(selected_business_id_ids)
 
-    for b_id, p_id in zip(business_ids, platform_ids):
+    for old in active_assignments:
+        if old.business_id_id not in new_id_set:
+            old.transferred_at = datetime.utcnow()
+            # Remove current link for this business ID
+            BusinessDriver.query.filter_by(business_id=old.business_id_id).delete()
+
+    # Assign new/kept IDs
+    for b_id in selected_business_id_ids:
+        # If already active for this driver, keep link and continue
+        if b_id in active_id_set:
+            BusinessDriver.query.filter_by(business_id=b_id).delete()
+            db.session.add(
+                BusinessDriver(
+                    driver_id=driver.id,
+                    business_id=b_id,
+                )
+            )
+            continue
+
+        # Check if assigned to another driver (active)
+        existing = (
+            DriverBusinessIDS.query
+            .filter_by(business_id_id=b_id, transferred_at=None)
+            .first()
+        )
+        previous_driver_id = None
+        if existing and existing.driver_id != driver.id:
+            existing.transferred_at = datetime.utcnow()
+            previous_driver_id = existing.driver_id
+
+        # Always create a fresh history record
         db.session.add(
             DriverBusinessIDS(
                 driver_id=driver.id,
-                business_id_id=int(b_id),
+                business_id_id=b_id,
                 assigned_at=datetime.utcnow(),
                 transferred_at=None,
+                previous_driver_id=previous_driver_id,
             )
         )
+
+        # Replace current link (one active per business_id_id)
+        BusinessDriver.query.filter_by(business_id=b_id).delete()
         db.session.add(
             BusinessDriver(
                 driver_id=driver.id,
-                business_id=int(b_id),
-                platform_id=int(p_id),
+                business_id=b_id,
             )
         )
 

@@ -243,7 +243,11 @@ def dashboard():
     # Businesses and available IDs
     # -------------------------
     businesses = _cached_businesses()
-    assigned_ids_subq = db.session.query(BusinessDriver.business_id).subquery()
+    assigned_ids_subq = (
+        db.session.query(DriverBusinessIDS.business_id_id)
+        .filter(DriverBusinessIDS.transferred_at.is_(None))
+        .subquery()
+    )
     all_businesses = []
     for b in businesses:
         available_ids = (
@@ -303,11 +307,19 @@ def driver_json(driver_id):
     driver = Driver.query.get_or_404(driver_id)
 
     assigned = []
-    for bd in driver.business_links:
-        assigned.append({
-            "business_id": bd.business_id,
-            "platform_id": getattr(bd, "platform_id", None)
-        })
+    active_ids = (
+        DriverBusinessIDS.query
+        .filter_by(driver_id=driver.id, transferred_at=None)
+        .all()
+    )
+    if active_ids:
+        business_id_ids = [link.business_id_id for link in active_ids]
+        business_ids = BusinessID.query.filter(BusinessID.id.in_(business_id_ids)).all()
+        for bid in business_ids:
+            assigned.append({
+                "business_id": bid.business_id,
+                "platform_id": bid.id
+            })
 
     driver_data = {
         "id": driver.id,
@@ -405,7 +417,7 @@ def add_driver():
     business_ids = request.form.getlist("business_id[]")
     platform_ids = request.form.getlist("platform_id[]")
     try:
-        if business_ids:
+        if platform_ids:
             update_driver_from_form(driver, request.form, business_ids, platform_ids)
         else:
             db.session.commit()
