@@ -4,6 +4,7 @@ from typing import Iterable
 from extensions import db
 from models import (
     BusinessDriver,
+    BusinessID,
     Driver,
     DriverBusinessIDS,
     Offboarding,
@@ -64,7 +65,7 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
 
     # --- Unify assignment logic with DMS ---
     # In DMS, assignments are made by BusinessID (business_ids.id)
-    selected_business_id_ids = [int(p) for p in platform_ids if p]
+    selected_business_id_ids = [int(str(p).strip()) for p in platform_ids if str(p).strip()]
 
     # Close assignments removed from this driver
     active_assignments = (
@@ -124,6 +125,25 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
                 business_id=b_id,
             )
         )
+
+    # Keep legacy fields in sync for modules still reading drivers.platform/platform_id
+    selected_business_ids = (
+        BusinessID.query
+        .filter(BusinessID.id.in_(selected_business_id_ids))
+        .all()
+    ) if selected_business_id_ids else []
+
+    business_id_map = {int(bid.id): bid for bid in selected_business_ids}
+    business_names = []
+    for b_id in selected_business_id_ids:
+        bid = business_id_map.get(b_id)
+        if not bid or not bid.business or not bid.business.name:
+            continue
+        if bid.business.name not in business_names:
+            business_names.append(bid.business.name)
+
+    driver.platform_id = ",".join(str(b_id) for b_id in selected_business_id_ids) if selected_business_id_ids else None
+    driver.platform = ", ".join(business_names) if business_names else None
 
     db.session.commit()
     return driver

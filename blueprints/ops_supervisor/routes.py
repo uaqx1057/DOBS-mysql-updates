@@ -129,7 +129,7 @@ def approve_driver(driver_id):
     driver = Driver.query.get_or_404(driver_id)
     current_app.logger.info(f"[OPS_SUPERVISOR][START] driver_id={driver_id} form={dict(request.form)}")
 
-    platform_ids = [pid for pid in (form.platform_ids_csv.data or "").split(",") if pid]
+    platform_ids = [pid.strip() for pid in (form.platform_ids_csv.data or "").split(",") if pid.strip()]
     issued_mobile_number = (form.issued_mobile_number.data or "").strip() or None
     issued_device_id = (form.issued_device_id.data or "").strip() or None
     mobile_issued = bool(form.mobile_issued.data)
@@ -195,6 +195,27 @@ def approve_driver(driver_id):
             db.session.add(business_driver)
 
         # -------------------------
+        # Keep legacy driver platform fields in sync
+        # -------------------------
+        selected_business_ids = (
+            BusinessID.query
+            .filter(BusinessID.id.in_([int(pid) for pid in platform_ids]))
+            .all()
+        )
+        business_id_map = {str(bid.id): bid for bid in selected_business_ids}
+
+        business_names = []
+        for pid in platform_ids:
+            bid = business_id_map.get(pid)
+            if not bid or not bid.business or not bid.business.name:
+                continue
+            if bid.business.name not in business_names:
+                business_names.append(bid.business.name)
+
+        driver.platform_id = ",".join(platform_ids) if platform_ids else None
+        driver.platform = ", ".join(business_names) if business_names else None
+
+        # -------------------------
         # Update driver info
         # -------------------------
         driver.issued_mobile_number = issued_mobile_number
@@ -204,7 +225,10 @@ def approve_driver(driver_id):
         driver.onboarding_stage = "Fleet Manager"
 
         db.session.commit()
-        current_app.logger.info(f"[OPS_SUPERVISOR][SAVED] driver_id={driver.id} assigned_ids={platform_ids}")
+        current_app.logger.info(
+            f"[OPS_SUPERVISOR][SAVED] driver_id={driver.id} assigned_ids={platform_ids} "
+            f"legacy_platform_id={driver.platform_id}"
+        )
         flash(f"✅ Driver {driver.name} processed and sent to Fleet Manager.", "success")
 
     except Exception as e:
