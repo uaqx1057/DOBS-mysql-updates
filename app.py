@@ -23,7 +23,7 @@ import models  # noqa: F401
 # Import blueprints
 from blueprints.public.routes import public_bp
 from blueprints.auth.routes import auth_bp
-from blueprints.admin.routes import admin_bp
+from blueprints.admin import admin_bp
 from blueprints.hr.routes import hr_bp
 from blueprints.ops_coordinator.routes import ops_coordinator_bp
 from blueprints.ops_manager.routes import ops_manager_bp

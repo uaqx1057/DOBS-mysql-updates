@@ -1,0 +1,30 @@
+{% if drivers %}
+<table class="table table-striped table-bordered">
+    <thead>
+        <tr>
+            <th>Full Name</th>
+            <th>Iqama Number</th>
+            <th>City</th>
+            <th>Platform</th>
+            <th>Assignment Date</th>
+            <th>Transfer Done</th>
+            <th>Stage</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in drivers %}
+        <tr>
+            <td>{{ d.name or d.full_name or '' }}</td>
+            <td>{{ d.iqaama_number or d.iqama_number or '' }}</td>
+            <td>{{ d.city or '' }}</td>
+            <td>{{ d.platform_display or d.platform or d.platform_id or '' }}</td>
+            <td>{{ d.assignment_date.strftime('%Y-%m-%d') if d.assignment_date else '' }}</td>
+            <td>{{ d.sponsorship_transfer_status or 'Pending' }}</td>
+            <td>{{ d.onboarding_stage or '' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="alert alert-info mb-0">No records found.</div>
+{% endif %}

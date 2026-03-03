@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from typing import Iterable
+from typing import Iterable, Optional
 
 from extensions import db
 from models import (
@@ -31,9 +31,16 @@ def _parse_date_value(value):
     if isinstance(value, date):
         return value
     try:
-        if "T" in value:
-            return datetime.fromisoformat(value)
-        return datetime.fromisoformat(value).date()
+        text_value = str(value).strip()
+        if "T" in text_value:
+            try:
+                return datetime.fromisoformat(text_value)
+            except AttributeError:
+                return datetime.strptime(text_value, "%Y-%m-%dT%H:%M:%S")
+        try:
+            return datetime.fromisoformat(text_value).date()
+        except AttributeError:
+            return datetime.strptime(text_value, "%Y-%m-%d").date()
     except Exception:
         return None
 
@@ -64,8 +71,17 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
             setattr(driver, field, value)
 
     # --- Unify assignment logic with DMS ---
-    # In DMS, assignments are made by BusinessID (business_ids.id)
+    # Assignments are made by BusinessID (business_ids.id) for history,
+    # while business_driver stores Business type IDs (businesses.id).
     selected_business_id_ids = [int(str(p).strip()) for p in platform_ids if str(p).strip()]
+
+    selected_business_ids = (
+        BusinessID.query
+        .filter(BusinessID.id.in_(selected_business_id_ids))
+        .all()
+    ) if selected_business_id_ids else []
+
+    selected_business_type_ids = list({int(bid.business_id) for bid in selected_business_ids if bid.business_id is not None})
 
     # Close assignments removed from this driver
     active_assignments = (
@@ -79,20 +95,11 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
     for old in active_assignments:
         if old.business_id_id not in new_id_set:
             old.transferred_at = datetime.utcnow()
-            # Remove current link for this business ID
-            BusinessDriver.query.filter_by(business_id=old.business_id_id).delete()
 
     # Assign new/kept IDs
     for b_id in selected_business_id_ids:
-        # If already active for this driver, keep link and continue
+        # If already active for this driver, keep history as-is
         if b_id in active_id_set:
-            BusinessDriver.query.filter_by(business_id=b_id).delete()
-            db.session.add(
-                BusinessDriver(
-                    driver_id=driver.id,
-                    business_id=b_id,
-                )
-            )
             continue
 
         # Check if assigned to another driver (active)
@@ -117,22 +124,28 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
             )
         )
 
-        # Replace current link (one active per business_id_id)
-        BusinessDriver.query.filter_by(business_id=b_id).delete()
-        db.session.add(
-            BusinessDriver(
-                driver_id=driver.id,
-                business_id=b_id,
+    # Sync business_driver using Business type IDs (businesses.id) for this driver only
+    if selected_business_type_ids:
+        BusinessDriver.query.filter(
+            BusinessDriver.driver_id == driver.id,
+            ~BusinessDriver.business_id.in_(selected_business_type_ids)
+        ).delete(synchronize_session=False)
+    else:
+        BusinessDriver.query.filter_by(driver_id=driver.id).delete(synchronize_session=False)
+
+    existing_business_links = {
+        row.business_id for row in BusinessDriver.query.filter_by(driver_id=driver.id).all()
+    }
+    for business_type_id in selected_business_type_ids:
+        if business_type_id not in existing_business_links:
+            db.session.add(
+                BusinessDriver(
+                    driver_id=driver.id,
+                    business_id=business_type_id,
+                )
             )
-        )
 
     # Keep legacy fields in sync for modules still reading drivers.platform/platform_id
-    selected_business_ids = (
-        BusinessID.query
-        .filter(BusinessID.id.in_(selected_business_id_ids))
-        .all()
-    ) if selected_business_id_ids else []
-
     business_id_map = {int(bid.id): bid for bid in selected_business_ids}
     business_names = []
     for b_id in selected_business_id_ids:
@@ -182,7 +195,7 @@ def update_user_from_form(user: User, username: str, name: str, designation: str
     return user
 
 
-def delete_user(user: User, acting_user_id: int | None = None):
+def delete_user(user: User, acting_user_id: Optional[int] = None):
     """Delete a user safely by reassigning required references.
 
     Offboarding.requested_by_id is non-nullable, so we reassign those records

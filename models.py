@@ -338,6 +338,7 @@ class Business(db.Model):
 
     # Relationship to BusinessIDs
     ids = db.relationship("BusinessID", back_populates="business", cascade="all, delete-orphan")
+    drivers = db.relationship("BusinessDriver", back_populates="business", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Business {self.name}>"
@@ -357,9 +358,6 @@ class BusinessID(db.Model):
     # Relationship back to Business
     business = db.relationship("Business", back_populates="ids")
 
-    # Relationship to BusinessDriver (assignments)
-    drivers = db.relationship("BusinessDriver", back_populates="business_id_obj")
-
     def __repr__(self):
         return f"<BusinessID {self.value} - Active: {self.is_active}>"
 
@@ -367,15 +365,15 @@ class BusinessID(db.Model):
 class BusinessDriver(db.Model):
     __tablename__ = "business_driver"
 
-    business_id = db.Column(db.BigInteger, db.ForeignKey("business_ids.id"), primary_key=True)
+    business_id = db.Column(db.BigInteger, db.ForeignKey("businesses.id"), primary_key=True)
     driver_id = db.Column(db.BigInteger, db.ForeignKey("drivers.id"), primary_key=True)
 
     # Relationships
     driver = db.relationship("Driver", back_populates="business_links")
-    business_id_obj = db.relationship("BusinessID", back_populates="drivers")
+    business = db.relationship("Business", back_populates="drivers")
 
     def __repr__(self):
-        return f"<BusinessDriver Driver={self.driver_id}, BusinessID={self.business_id}>"
+        return f"<BusinessDriver Driver={self.driver_id}, Business={self.business_id}>"
 
 
 class DriverBusinessIDS(db.Model):

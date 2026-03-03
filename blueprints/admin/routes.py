@@ -1,4 +1,4 @@
-from flask import Blueprint, Flask, render_template, request, redirect, url_for, flash, session , current_app
+from flask import Flask, render_template, request, redirect, url_for, flash, session , current_app
 from flask_login import login_required, current_user
 from models import Business, DriverBusinessIDS, Offboarding, db, Driver, User, BusinessID, BusinessDriver
 from extensions import db, mail, limiter
@@ -20,9 +20,7 @@ from forms.common import CSRFOnlyForm, AddUserForm, AddDriverForm, ChangePasswor
 from sqlalchemy.exc import IntegrityError
 from utils.auth import require_roles_or_owner
 from utils.cache import ttl_cache
-
-# âœ… Blueprint for SuperAdmin/Admin
-admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
+from . import admin_bp
 
 UPLOAD_FOLDER = "static/uploads"
 
