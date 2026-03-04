@@ -150,20 +150,17 @@ def approve_driver(driver_id):
 
         selected_business_ids = (
             BusinessID.query
-            .filter(BusinessID.id.in_(selected_platform_ints))
+            .filter(
+                BusinessID.id.in_(selected_platform_ints),
+                BusinessID.is_active == True,
+            )
             .all()
         )
         selected_business_id_ids = [int(bid.id) for bid in selected_business_ids]
         selected_business_type_ids = {int(bid.business_id) for bid in selected_business_ids if bid.business_id is not None}
 
-        # Backward compatibility: if incoming IDs are businesses.id, still assign business_driver.
-        unresolved_ids = [pid for pid in selected_platform_ints if pid not in set(selected_business_id_ids)]
-        if unresolved_ids:
-            fallback_business_rows = Business.query.filter(Business.id.in_(unresolved_ids)).all()
-            selected_business_type_ids.update(int(b.id) for b in fallback_business_rows)
-
-        if not selected_business_id_ids and not selected_business_type_ids:
-            raise ValueError("No valid business or business ID found for submitted platform IDs")
+        if not selected_business_id_ids:
+            raise ValueError("No valid active business IDs found for submitted selection")
 
         # -------------------------
         # Update DriverBusinessIDS (history table)
@@ -172,45 +169,38 @@ def approve_driver(driver_id):
             driver_id=driver.id,
             transferred_at=None
         ).all()
-        if selected_business_id_ids:
-            active_id_set = {link.business_id_id for link in active_links}
-            new_id_set = set(selected_business_id_ids)
+        active_id_set = {link.business_id_id for link in active_links}
+        new_id_set = set(selected_business_id_ids)
 
-            # Close removed assignments for this driver
-            for link in active_links:
-                if link.business_id_id not in new_id_set:
-                    link.transferred_at = datetime.utcnow()
+        # Close removed assignments for this driver
+        for link in active_links:
+            if link.business_id_id not in new_id_set:
+                link.transferred_at = datetime.utcnow()
 
-            # Insert new assignments / reassign if needed
-            for bid_int in selected_business_id_ids:
-                # If already active for this driver, keep history as-is
-                if bid_int in active_id_set:
-                    continue
+        # Insert new assignments / reassign if needed
+        for bid_int in selected_business_id_ids:
+            # If already active for this driver, keep history as-is
+            if bid_int in active_id_set:
+                continue
 
-                existing = DriverBusinessIDS.query.filter_by(
-                    business_id_id=bid_int,
-                    transferred_at=None
-                ).first()
+            existing = DriverBusinessIDS.query.filter_by(
+                business_id_id=bid_int,
+                transferred_at=None
+            ).first()
 
-                previous_driver_id = None
-                if existing and existing.driver_id != driver.id:
-                    existing.transferred_at = datetime.utcnow()
-                    previous_driver_id = existing.driver_id
+            previous_driver_id = None
+            if existing and existing.driver_id != driver.id:
+                existing.transferred_at = datetime.utcnow()
+                previous_driver_id = existing.driver_id
 
-                new_link = DriverBusinessIDS(
-                    driver_id=driver.id,
-                    business_id_id=bid_int,  # FK to BusinessID
-                    previous_driver_id=previous_driver_id,
-                    assigned_at=datetime.utcnow(),
-                    transferred_at=None
-                )
-                db.session.add(new_link)
-        else:
-            current_app.logger.warning(
-                "[OPS_SUPERVISOR] No business_ids.id resolved from submitted IDs %s; "
-                "history table update skipped, assigning business types only",
-                platform_ids,
+            new_link = DriverBusinessIDS(
+                driver_id=driver.id,
+                business_id_id=bid_int,  # FK to BusinessID
+                previous_driver_id=previous_driver_id,
+                assigned_at=datetime.utcnow(),
+                transferred_at=None
             )
+            db.session.add(new_link)
 
         # -------------------------
         # Sync business_driver using Business type IDs (businesses.id)
@@ -234,17 +224,17 @@ def approve_driver(driver_id):
         # -------------------------
         # Keep legacy driver platform fields in sync
         # -------------------------
-        business_id_map = {str(bid.id): bid for bid in selected_business_ids}
+        business_id_map = {int(bid.id): bid for bid in selected_business_ids}
 
         business_names = []
-        for pid in platform_ids:
-            bid = business_id_map.get(pid)
+        for bid_int in selected_business_id_ids:
+            bid = business_id_map.get(bid_int)
             if not bid or not bid.business or not bid.business.name:
                 continue
             if bid.business.name not in business_names:
                 business_names.append(bid.business.name)
 
-        driver.platform_id = ",".join(platform_ids) if platform_ids else None
+        driver.platform_id = ",".join(str(v) for v in selected_business_id_ids) if selected_business_id_ids else None
         driver.platform = ", ".join(business_names) if business_names else None
 
         # -------------------------
