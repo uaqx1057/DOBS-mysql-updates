@@ -1352,7 +1352,7 @@ const allBusinesses = JSON.parse(document.getElementById('allBusinessesData')?.t
 // ----------------------
 // Add / Remove Businesses
 // ----------------------
-function addBusinessRow(selectedBusinessId = '', selectedPlatformId = '', containerId = 'businessContainer') {
+function addBusinessRow(selectedBusinessId = '', selectedPlatformId = '', containerId = 'businessContainer', selectedPlatformValue = '') {
   const container = document.getElementById(containerId);
   if (!container) return;
     const row = document.createElement('div');
@@ -1402,6 +1402,14 @@ function addBusinessRow(selectedBusinessId = '', selectedPlatformId = '', contai
           if(String(p.id) === String(selectedPlatformId)) opt.selected = true;
           selPlatform.appendChild(opt);
         });
+      }
+
+      if (selectedPlatformId && !Array.from(selPlatform.options).some(o => String(o.value) === String(selectedPlatformId))) {
+        const fallbackOpt = document.createElement('option');
+        fallbackOpt.value = selectedPlatformId;
+        fallbackOpt.text = selectedPlatformValue || `Assigned ID (${selectedPlatformId})`;
+        fallbackOpt.selected = true;
+        selPlatform.appendChild(fallbackOpt);
       }
     }
 
@@ -1482,7 +1490,7 @@ function populateEditForm(d) {
     const container = document.getElementById('businessContainer');
     container.innerHTML = '';
     if(d.assigned_businesses && d.assigned_businesses.length) {
-        d.assigned_businesses.forEach(b => addBusinessRow(b.business_id, b.platform_id));
+      d.assigned_businesses.forEach(b => addBusinessRow(b.business_id, b.platform_id, 'businessContainer', b.platform_value));
     } else {
         addBusinessRow();
     }

@@ -322,7 +322,8 @@ def driver_json(driver_id):
         for bid in business_ids:
             assigned.append({
                 "business_id": bid.business_id,
-                "platform_id": bid.id
+                "platform_id": bid.id,
+                "platform_value": bid.value,
             })
 
     driver_data = {

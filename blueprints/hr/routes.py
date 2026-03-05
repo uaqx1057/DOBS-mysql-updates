@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 hr_bp = Blueprint("hr", __name__, url_prefix='/hr')
 
 ALLOWED_EXT = {'.jpg', '.jpeg', '.png', '.pdf'}
+DEFAULT_DRIVER_PASSWORD = "12344321"
 
 
 def _upload_root() -> str:
@@ -107,9 +108,11 @@ def _ensure_driver_password(driver: Driver):
     if driver.password:
         return
 
-    # Create a unique, non-shared password hash for the driver
-    random_password = os.urandom(16).hex()
-    driver.password = generate_password_hash(random_password)
+    driver.password = generate_password_hash(DEFAULT_DRIVER_PASSWORD)
+
+
+def _set_default_driver_password(driver: Driver):
+    driver.password = generate_password_hash(DEFAULT_DRIVER_PASSWORD)
 
 def _serialize_offboarding(o):
     return {
@@ -331,6 +334,7 @@ def complete_sponsorship_transfer(driver_id):
             # 🔹 Case 1: Driver has NO Qiwa contract
             driver.onboarding_stage = "Completed"
             _ensure_driver_code(driver)
+            _set_default_driver_password(driver)
             driver.sponsorship_transfer_status = "Not Required"
             driver.sponsorship_transfer_proof = None
             driver.sponsorship_transfer_completed_at = datetime.utcnow()
@@ -346,6 +350,7 @@ def complete_sponsorship_transfer(driver_id):
                 save_transfer_proof(driver, file, _upload_root(), transfer_status, max_bytes)
                 driver.onboarding_stage = "Completed"
                 _ensure_driver_code(driver)
+                _set_default_driver_password(driver)
                 db.session.commit()
                 current_app.logger.info(
                     "hr_complete_transfer",
@@ -453,7 +458,7 @@ def complete_driver(driver_id):
     if not driver.qiwa_contract_created:
         driver.onboarding_stage = "Completed"
         _ensure_driver_code(driver) 
-        _ensure_driver_password(driver)
+        _set_default_driver_password(driver)
         driver.sponsorship_transfer_status = "Not Required"
         driver.sponsorship_transfer_proof = None
         driver.sponsorship_transfer_completed_at = datetime.utcnow()

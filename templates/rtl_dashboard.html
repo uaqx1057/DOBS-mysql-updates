@@ -1156,7 +1156,7 @@ function openViewModal(e) {
         // Parse embedded JSON so static analysis remains valid pre-templating
         const allBusinesses = JSON.parse(document.getElementById('allBusinessesData')?.textContent || '[]');
 
-        function addBusinessRow(selectedBusinessId = '', selectedId = '') {
+        function addBusinessRow(selectedBusinessId = '', selectedId = '', selectedIdValue = '') {
           const container = document.getElementById('businessContainer');
 
           const row = document.createElement('div');
@@ -1212,6 +1212,14 @@ function openViewModal(e) {
                 selId.appendChild(opt);
               });
             }
+
+            if (selectedId && !Array.from(selId.options).some(o => String(o.value) === String(selectedId))) {
+              const fallbackOpt = document.createElement('option');
+              fallbackOpt.value = selectedId;
+              fallbackOpt.text = selectedIdValue || `Assigned ID (${selectedId})`;
+              fallbackOpt.selected = true;
+              selId.appendChild(fallbackOpt);
+            }
           }
 
           if (selectedBusinessId) populateIds(selectedBusinessId);
@@ -1241,8 +1249,21 @@ function openViewModal(e) {
           try {
             const card = btn.closest('.driver-card');
             const d = JSON.parse(card.dataset.driver);
-            populateEditForm(d);
-            document.getElementById('editModal').classList.add('show');
+            fetch(`${adminBaseUrl}driver/${d.id}/json`)
+              .then(res => {
+                if (!res.ok) {
+                  throw new Error(`Request failed: ${res.status}`);
+                }
+                return res.json();
+              })
+              .then(driverData => {
+                populateEditForm(driverData);
+                document.getElementById('editModal').classList.add('show');
+              })
+              .catch(err => {
+                console.error('openEditModal fetch', err);
+                showToast('Unable to open edit form. Please refresh and try again.', 'error');
+              });
           } catch(err) {
             console.error('openEditModal', err);
             showToast('Unable to open edit form — check console.', 'error');
@@ -1263,7 +1284,7 @@ function openViewModal(e) {
           const container = document.getElementById('businessContainer');
           container.innerHTML = '';
           if(d.assigned_businesses && d.assigned_businesses.length) {
-            d.assigned_businesses.forEach(bid => addBusinessRow(bid.business_id, bid.platform_id));
+            d.assigned_businesses.forEach(bid => addBusinessRow(bid.business_id, bid.platform_id, bid.platform_value));
           } else {
             addBusinessRow();
           }

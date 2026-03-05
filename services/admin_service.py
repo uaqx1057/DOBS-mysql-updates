@@ -15,6 +15,9 @@ import sqlalchemy as sa
 from werkzeug.security import generate_password_hash
 
 
+DEFAULT_DRIVER_PASSWORD = "12344321"
+
+
 def _to_bool(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -69,6 +72,9 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
                 setattr(driver, field, None)
         else:
             setattr(driver, field, value)
+
+    if form_data.get("onboarding_stage") == "Completed":
+        driver.password = generate_password_hash(DEFAULT_DRIVER_PASSWORD)
 
     # --- Unify assignment logic with DMS ---
     # Assignments are made by BusinessID (business_ids.id) for history,
