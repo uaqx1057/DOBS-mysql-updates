@@ -7,6 +7,7 @@ from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_mail import Message
 from sqlalchemy import exists
+from sqlalchemy import or_
 from extensions import db, mail, limiter
 from models import Driver, User, Offboarding
 from utils.email_utils import send_password_change_email, safe_send_email
@@ -113,19 +114,50 @@ def dashboard_finance():
 
     from flask import session
     lang = session.get("lang", "en")
+    q = (request.args.get("q") or "").strip()
 
     # -------------------------
     # Fetch data
     # -------------------------
-    pending_drivers = Driver.query.filter_by(onboarding_stage="Finance").all()
-    completed_drivers = Driver.query.filter(
+    pending_drivers_query = Driver.query.filter_by(onboarding_stage="Finance")
+    completed_drivers_query = Driver.query.filter(
         Driver.onboarding_stage == "Completed",
         ~exists().where(Offboarding.driver_id == Driver.id)
-    ).all()
+    )
 
-    offboarding_requests = Offboarding.query.join(Offboarding.driver).filter(
+    if q:
+        pattern = f"%{q}%"
+        pending_drivers_query = pending_drivers_query.filter(
+            or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
+        completed_drivers_query = completed_drivers_query.filter(
+            or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
+
+    pending_drivers = pending_drivers_query.all()
+    completed_drivers = completed_drivers_query.all()
+
+    offboarding_requests_query = Offboarding.query.join(Offboarding.driver).filter(
         Offboarding.status == "Finance"
-    ).order_by(Offboarding.requested_at.desc()).all()
+    )
+    if q:
+        pattern = f"%{q}%"
+        offboarding_requests_query = offboarding_requests_query.filter(
+            or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
+    offboarding_requests = offboarding_requests_query.order_by(Offboarding.requested_at.desc()).all()
 
     total_drivers = len(pending_drivers)
     total_users = len(offboarding_requests)
@@ -142,7 +174,8 @@ def dashboard_finance():
         total_drivers=total_drivers,
         total_users=total_users,
         user=current_user,
-        lang=lang
+        lang=lang,
+        q=q,
     )
 
 # -------------------------

@@ -7,6 +7,7 @@ from datetime import datetime, date
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy.orm import joinedload
+from sqlalchemy import or_
 from models import Offboarding, Driver, User, Vehicle, AssignDriver, AssignDriverReport
 from utils.email_utils import send_password_change_email
 import os
@@ -40,16 +41,27 @@ def dashboard_fleet():
         flash("Access denied", "danger")
         return redirect(url_for("auth.login"))
 
+    q = (request.args.get("q") or "").strip()
+
     total_drivers = Driver.query.filter_by(onboarding_stage="Fleet Manager").count()
     offboarding_fleet = Offboarding.query.filter_by(status="Fleet").count()
     offboarding_pending_tamm = Offboarding.query.filter_by(status="pending_tamm").count()
 
-    onboarding_drivers = (
+    onboarding_drivers_query = (
         Driver.query
         #.options(joinedload(Driver.platforms))
         .filter_by(onboarding_stage="Fleet Manager")
-        .all()
     )
+    if q:
+        pattern = f"%{q}%"
+        onboarding_drivers_query = onboarding_drivers_query.filter(
+            or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
+    onboarding_drivers = onboarding_drivers_query.all()
 
     # Latest offboarding per driver
     latest_requests_subq = (
@@ -62,7 +74,7 @@ def dashboard_fleet():
         .subquery()
     )
 
-    offboarding_requests = (
+    offboarding_requests_query = (
         db.session.query(Offboarding)
         .join(
             latest_requests_subq,
@@ -70,9 +82,17 @@ def dashboard_fleet():
             (Offboarding.requested_at == latest_requests_subq.c.latest_request)
         )
         .options(joinedload(Offboarding.driver))
-        .order_by(Offboarding.requested_at.desc())
-        .all()
     )
+    if q:
+        pattern = f"%{q}%"
+        offboarding_requests_query = offboarding_requests_query.join(Offboarding.driver).filter(
+            or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
+    offboarding_requests = offboarding_requests_query.order_by(Offboarding.requested_at.desc()).all()
 
     # Available vehicles (not assigned and marked available)
     assigned_vehicle_ids = (
@@ -102,6 +122,7 @@ def dashboard_fleet():
         total_users=offboarding_fleet,
         total_tamm=offboarding_pending_tamm,
         available_vehicles=available_vehicles,
+        q=q,
     )
 
 

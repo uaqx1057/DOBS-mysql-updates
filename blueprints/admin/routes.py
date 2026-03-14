@@ -18,6 +18,7 @@ from services.admin_service import (
 )
 from forms.common import CSRFOnlyForm, AddUserForm, AddDriverForm, ChangePasswordForm, EditUserForm
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_
 from utils.auth import require_roles_or_owner
 from utils.cache import ttl_cache
 from . import admin_bp
@@ -108,9 +109,27 @@ def dashboard():
     # Drivers and Offboarding
     # -------------------------
     page, per_page = _pagination_params()
+    search_q = (request.args.get("q") or "").strip()
 
-    drivers_query = Driver.query.order_by(Driver.id.desc())
-    drivers_total = drivers_query.count()
+    # Paginate pending onboarding drivers only, so pages refill correctly
+    # after a driver moves to Completed and leaves the pending pool.
+    filtered_drivers_query = Driver.query.filter(Driver.onboarding_stage != "Completed")
+    if search_q:
+        pattern = f"%{search_q}%"
+        filtered_drivers_query = filtered_drivers_query.filter(
+            or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
+
+    paged_total_drivers = filtered_drivers_query.count()
+    total_pages = max(1, (paged_total_drivers + per_page - 1) // per_page)
+    page = min(page, total_pages)
+
+    drivers_query = filtered_drivers_query.order_by(Driver.id.desc())
+    drivers_total = Driver.query.count()
     drivers_completed_total = Driver.query.filter(Driver.onboarding_stage == "Completed").count()
     drivers_pending_total = max(0, drivers_total - drivers_completed_total)
     drivers = drivers_query.offset((page - 1) * per_page).limit(per_page).all()
@@ -288,12 +307,15 @@ def dashboard():
         completed_offboarding_drivers=completed_offboarding_driver_dicts,
         total_users=len(users),
         total_drivers=drivers_total,
+        paged_total_drivers=paged_total_drivers,
         total_pending_onboarded=drivers_pending_total,
         total_completed_onboarded=drivers_completed_total,
         total_pending_offboarded=pending_total,
         total_completed_offboarded=completed_total,
         page=page,
+        total_pages=total_pages,
         per_page=per_page,
+        q=search_q,
         lang=lang,
         rtl=rtl,
         all_businesses=all_businesses

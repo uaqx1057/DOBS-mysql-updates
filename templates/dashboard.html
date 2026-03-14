@@ -441,13 +441,13 @@
         <div class="tab-content">
           <div class="controls">
             <div class="search-box">
-              <input id="globalSearch" type="text" placeholder="Search drivers by name / iqama" oninput="globalSearchFilter()">
+              <input id="globalSearch" type="text" value="{{ q or '' }}" placeholder="Search drivers by name / iqama" oninput="globalSearchFilter()">
             </div>
             <div class="pagination-bar">
               <span class="page-chip">Page {{ page }} · {{ per_page }} per page</span>
               <div style="display:flex; gap:8px; align-items:center;">
-                <a class="page-link {% if page <= 1 %}disabled{% endif %}" href="{% if page > 1 %}{{ url_for('admin.dashboard', page=page-1, per_page=per_page) }}{% else %}#{% endif %}">Prev</a>
-                <a class="page-link {% if page * per_page >= total_drivers %}disabled{% endif %}" href="{% if page * per_page < total_drivers %}{{ url_for('admin.dashboard', page=page+1, per_page=per_page) }}{% else %}#{% endif %}">Next</a>
+                <a class="page-link {% if page <= 1 %}disabled{% endif %}" href="{% if page > 1 %}{{ url_for('admin.dashboard', page=page-1, per_page=per_page, q=q, lang=lang) }}{% else %}#{% endif %}">Prev</a>
+                <a class="page-link {% if page >= total_pages %}disabled{% endif %}" href="{% if page < total_pages %}{{ url_for('admin.dashboard', page=page+1, per_page=per_page, q=q, lang=lang) }}{% else %}#{% endif %}">Next</a>
               </div>
             </div>
           </div>
@@ -1894,16 +1894,19 @@ function closeModal(modalId) {
           });
 
           /* ----------------- search / filter helpers ----------------- */
+          let driverSearchTimer = null;
           function globalSearchFilter(){
-            const q = (document.getElementById('globalSearch').value || '').toLowerCase().trim();
-            document.querySelectorAll('.driver-card').forEach(card => {
-              const json = card.dataset.driver || '{}';
-              try{
-                const d = JSON.parse(json);
-                const hay = `${d.name||''} ${d.iqaama_number||''} ${d.platform||''}`.toLowerCase();
-                card.style.display = hay.includes(q) ? '' : 'none';
-              }catch(e){ card.style.display = ''; }
-            });
+            clearTimeout(driverSearchTimer);
+            driverSearchTimer = setTimeout(() => {
+              const q = (document.getElementById('globalSearch').value || '').trim();
+              const params = new URLSearchParams(window.location.search);
+              if (q) params.set('q', q);
+              else params.delete('q');
+              params.set('page', '1');
+              params.set('per_page', '{{ per_page }}');
+              params.set('lang', '{{ lang }}');
+              window.location.href = `${window.location.pathname}?${params.toString()}`;
+            }, 300);
           }
 
           function filterUsers(){

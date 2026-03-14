@@ -117,7 +117,7 @@
               <div class="column">
                 <h4>في انتظار الموافقات المالية</h4>
                 <div class="search-box">
-                  <input type="text" id="pendingSearch" placeholder="جارٍ البحث عن السائقين المعلقين..." onkeyup="filterDrivers('pending')">
+                  <input type="text" id="pendingSearch" value="{{ q or '' }}" placeholder="جارٍ البحث عن السائقين المعلقين..." oninput="filterDrivers('pending')">
                 </div>
                 {% if pending_drivers %}
                 <div id="pendingDrivers">
@@ -165,7 +165,7 @@
               <div class="column">
                 <h4>الموافقات المالية المكتملة</h4>
                 <div class="search-box">
-                  <input type="text" id="completedSearch" placeholder="تمت عملية البحث عن برامج التشغيل..." onkeyup="filterDrivers('completed')">
+                  <input type="text" id="completedSearch" value="{{ q or '' }}" placeholder="تمت عملية البحث عن برامج التشغيل..." oninput="filterDrivers('completed')">
                 </div>
                 {% if completed_drivers %}
                 <div id="completedDrivers">
@@ -404,16 +404,19 @@
   // =========================
   // Filter drivers by search
   // =========================
+  let financeSearchTimer = null;
   function filterDrivers(section) {
-    let input = section === 'pending' ? document.getElementById("pendingSearch").value.toLowerCase() : document.getElementById("completedSearch").value.toLowerCase();
-    let container = section === 'pending' ? document.getElementById("pendingDrivers") : document.getElementById("completedDrivers");
-    if (!container) return;
-    let cards = Array.from(container.querySelectorAll(".driver-card"));
-    cards.forEach(card => {
-      const name = (card.querySelector(".driver-name")?.innerText || "").toLowerCase();
-      const iqama = (card.querySelector(".driver-iqama")?.innerText || "").toLowerCase();
-      card.classList.toggle("hidden", !(name.includes(input) || iqama.includes(input)));
-    });
+    clearTimeout(financeSearchTimer);
+    financeSearchTimer = setTimeout(() => {
+      const input = section === 'pending'
+        ? document.getElementById("pendingSearch").value.trim()
+        : document.getElementById("completedSearch").value.trim();
+      const params = new URLSearchParams(window.location.search);
+      if (input) params.set('q', input);
+      else params.delete('q');
+      params.set('lang', 'ar');
+      window.location.href = `${window.location.pathname}?${params.toString()}`;
+    }, 300);
   }
 
   // =========================

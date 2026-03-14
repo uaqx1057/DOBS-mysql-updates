@@ -98,6 +98,9 @@
 <!-- ================= ONBOARDING TAB ================= -->
 <div id="onboardingTab">
   <h2>السائقون في انتظار تعيين الأسطول</h2>
+  <div style="margin: 0 0 12px 0;">
+    <input id="globalSearch" type="text" value="{{ q or '' }}" placeholder="ابحث عن السائق بالاسم / الإقامة" oninput="globalSearchFilter()" style="width:100%; padding:8px; border-radius:6px; border:1px solid #ccc;">
+  </div>
 
   {% if onboarding_drivers %}
     {% for driver in onboarding_drivers %}
@@ -167,6 +170,19 @@
 </div>
 
 <script>
+let fleetSearchTimer = null;
+function globalSearchFilter(){
+  clearTimeout(fleetSearchTimer);
+  fleetSearchTimer = setTimeout(() => {
+    const q = (document.getElementById('globalSearch').value || '').trim();
+    const params = new URLSearchParams(window.location.search);
+    if (q) params.set('q', q);
+    else params.delete('q');
+    params.set('lang', 'ar');
+    window.location.href = `${window.location.pathname}?${params.toString()}`;
+  }, 300);
+}
+
 /* ========= OPEN MODAL ========= */
 function openOnboardingModal(card) {
   try {

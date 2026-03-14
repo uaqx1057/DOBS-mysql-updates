@@ -140,10 +140,21 @@ def _serialize_offboarding(o):
 @login_required
 @require_roles("HR")
 def dashboard_hr():
+    q = (request.args.get("q") or "").strip()
 
-    all_drivers = Driver.query.filter(
+    all_drivers_query = Driver.query.filter(
         Driver.onboarding_stage.in_(["HR", "HR Final", "Completed"])
-    ).all()
+    )
+    if q:
+        pattern = f"%{q}%"
+        all_drivers_query = all_drivers_query.filter(
+            sa.or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
+    all_drivers = all_drivers_query.all()
 
     offboarding_driver_ids = {o.driver_id for o in Offboarding.query.all()}
 
@@ -163,7 +174,17 @@ def dashboard_hr():
     total_completed_offboarded = len(completed_offboarded)
 
     drivers_data = [_serialize_driver(d) for d in all_drivers if d.id not in offboarding_driver_ids]
-    offboardings = Offboarding.query.filter(Offboarding.status.in_(["HR", "Completed"])).all()
+    offboardings_query = Offboarding.query.filter(Offboarding.status.in_(["HR", "Completed"]))
+    if q:
+        pattern = f"%{q}%"
+        offboardings_query = offboardings_query.join(Offboarding.driver).filter(
+            sa.or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
+    offboardings = offboardings_query.all()
     offboarding_data = [_serialize_offboarding(o) for o in offboardings]
 
     from flask import session
@@ -177,7 +198,8 @@ def dashboard_hr():
         total_users=total_users,
         total_completed_onboarded=total_completed_onboarded,
         total_pending_onboarded=total_pending_onboarded,
-        total_completed_offboarded=total_completed_offboarded
+        total_completed_offboarded=total_completed_offboarded,
+        q=q,
     )
 
  

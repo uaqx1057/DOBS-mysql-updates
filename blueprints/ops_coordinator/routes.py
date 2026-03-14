@@ -36,14 +36,22 @@ def dashboard_ops_coordinator():
         return redirect(url_for("auth.login"))
 
     lang = session.get("lang", "en")
+    q = (request.args.get("q") or "").strip()
 
-    completed_drivers = (
+    completed_drivers_query = (
         Driver.query
         .filter(Driver.onboarding_stage == "Completed")
         .filter(~Driver.offboarding_records.any())
         .order_by(Driver.name.asc())
-        .all()
     )
+    if q:
+        pattern = f"%{q}%"
+        completed_drivers_query = completed_drivers_query.filter(
+            (Driver.name.ilike(pattern)) |
+            (Driver.iqaama_number.ilike(pattern)) |
+            (Driver.driver_id.ilike(pattern))
+        )
+    completed_drivers = completed_drivers_query.all()
 
     template = "rtl_dashboard_ops_coordinator.html" if lang == "ar" else "dashboard_ops_coordinator.html"
 
@@ -51,6 +59,7 @@ def dashboard_ops_coordinator():
         template,
         completed_drivers=completed_drivers,
         count_completed=len(completed_drivers),
+        q=q,
     )
 
 

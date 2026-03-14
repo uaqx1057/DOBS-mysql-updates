@@ -6,7 +6,7 @@ from flask_mail import Message
 from werkzeug.security import check_password_hash, generate_password_hash
 from datetime import datetime
 from utils.email_utils import send_password_change_email
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from flask_wtf.csrf import validate_csrf, CSRFError
 from forms.common import CSRFOnlyForm, ChangePasswordForm, OpsSupervisorApproveForm
 
@@ -38,7 +38,19 @@ def dashboard_ops_supervisor():
         flash("Access denied", "danger")
         return redirect(url_for("auth.login"))
 
-    onboarding_drivers = Driver.query.filter_by(onboarding_stage="Ops Supervisor").all()
+    q = (request.args.get("q") or "").strip()
+
+    onboarding_drivers_query = Driver.query.filter_by(onboarding_stage="Ops Supervisor")
+    if q:
+        pattern = f"%{q}%"
+        onboarding_drivers_query = onboarding_drivers_query.filter(
+            or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
+    onboarding_drivers = onboarding_drivers_query.all()
 
     # Latest offboarding requests
     latest_requests_subq = (
@@ -51,16 +63,25 @@ def dashboard_ops_supervisor():
         .subquery()
     )
 
-    offboarding_requests = (
+    offboarding_requests_query = (
         db.session.query(Offboarding)
         .join(
             latest_requests_subq,
             (Offboarding.driver_id == latest_requests_subq.c.driver_id) &
             (Offboarding.requested_at == latest_requests_subq.c.latest_request)
         )
-        .order_by(Offboarding.requested_at.desc())
-        .all()
+        .join(Offboarding.driver)
     )
+    if q:
+        pattern = f"%{q}%"
+        offboarding_requests_query = offboarding_requests_query.filter(
+            or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
+    offboarding_requests = offboarding_requests_query.order_by(Offboarding.requested_at.desc()).all()
 
     total_drivers = len(onboarding_drivers)
     total_offboardings = len(offboarding_requests)
@@ -105,7 +126,8 @@ def dashboard_ops_supervisor():
         onboarding_drivers=onboarding_drivers,
         offboarding_requests=offboarding_requests,
         all_businesses=all_businesses,
-        bool=bool
+        bool=bool,
+        q=q,
     )
 
 

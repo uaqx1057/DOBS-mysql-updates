@@ -387,7 +387,7 @@ function openHrFullModal(btn){
           {% set completed_drivers = drivers | selectattr("onboarding_stage", "equalto", "Completed") | list %}
           {% if completed_drivers %}
             <div class="search-box">
-              <input id="completedSearch" class="search-input" placeholder="تمت عملية البحث عن برامج التشغيل..." oninput="filterCompleted()">
+              <input id="completedSearch" class="search-input" value="{{ q or '' }}" placeholder="تمت عملية البحث عن برامج التشغيل..." oninput="filterCompleted()">
             </div>
             <div class="driver-cards" id="completedList">
               {% for driver in completed_drivers %}
@@ -572,7 +572,7 @@ function openHrFullModal(btn){
         <div id="offboardCompletedTab" style="display:none;">
           <h4>إتمام إنهاء الخدمة</h4>
           <div class="search-box">
-              <input id="offboardCompletedSearch" class="search-input" placeholder="تم إكمال البحث عن إنهاء عمل السائقين..." oninput="filterOffboardCompleted()">
+              <input id="offboardCompletedSearch" class="search-input" value="{{ q or '' }}" placeholder="تم إكمال البحث عن إنهاء عمل السائقين..." oninput="filterOffboardCompleted()">
           </div>
           <div class="driver-cards" id="offboardCompletedList">
               {% for o in offboarding_drivers if o.status == "Completed" %}
@@ -885,12 +885,17 @@ html += '</div>';
 }
 
   /* -------------- Completed search -------------- */
+    let hrSearchTimer = null;
     function filterCompleted(){
-      const q = (document.getElementById('completedSearch').value || '').toLowerCase().trim();
-      document.querySelectorAll('.completed-card').forEach(card => {
-        const text = card.innerText.toLowerCase();
-        card.style.display = text.includes(q) ? '' : 'none';
-      });
+      clearTimeout(hrSearchTimer);
+      hrSearchTimer = setTimeout(() => {
+        const q = (document.getElementById('completedSearch').value || '').trim();
+        const params = new URLSearchParams(window.location.search);
+        if (q) params.set('q', q);
+        else params.delete('q');
+        params.set('lang', 'ar');
+        window.location.href = `${window.location.pathname}?${params.toString()}`;
+      }, 300);
     }
 
     /* -------------- small utilities -------------- */
@@ -975,11 +980,15 @@ html += '</div>';
 }
 // Filter search
 function filterOffboardCompleted() {
-  const q = (document.getElementById('offboardCompletedSearch').value || '').toLowerCase().trim();
-  document.querySelectorAll('#offboardCompletedList .completed-card').forEach(card => {
-    const text = card.innerText.toLowerCase();
-    card.style.display = text.includes(q) ? '' : 'none';
-  });
+  clearTimeout(hrSearchTimer);
+  hrSearchTimer = setTimeout(() => {
+    const q = (document.getElementById('offboardCompletedSearch').value || '').trim();
+    const params = new URLSearchParams(window.location.search);
+    if (q) params.set('q', q);
+    else params.delete('q');
+    params.set('lang', 'ar');
+    window.location.href = `${window.location.pathname}?${params.toString()}`;
+  }, 300);
 }
   </script>
   </div>

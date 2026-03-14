@@ -315,7 +315,7 @@ document.getElementById('addBusinessBtn').addEventListener('click', () => addBus
         <div id="offboardingTab" style="display:none;">
           <div style="margin-top:6px;">
             <div style="margin-bottom:12px;">
-              <input type="text" id="offboardingSearch" placeholder="Search driver by name or Iqama..." oninput="filterOffboarding()" style="width:100%; padding:8px; border-radius:6px; border:1px solid #ccc;">
+              <input type="text" id="offboardingSearch" value="{{ q or '' }}" placeholder="Search driver by name or Iqama..." oninput="filterOffboarding()" style="width:100%; padding:8px; border-radius:6px; border:1px solid #ccc;">
             </div>
 
             <div class="driver-cards" id="offboardingCards">
@@ -555,12 +555,17 @@ document.getElementById('addBusinessBtn').addEventListener('click', () => addBus
     });
 
     // Search filter for offboarding cards
+    let offboardingSearchTimer = null;
     function filterOffboarding(){
-      const q = (document.getElementById('offboardingSearch').value || '').toLowerCase();
-      document.querySelectorAll('#offboardingCards .offboarding-card').forEach(card=>{
-        const text = card.innerText.toLowerCase();
-        card.style.display = text.includes(q) ? '' : 'none';
-      });
+      clearTimeout(offboardingSearchTimer);
+      offboardingSearchTimer = setTimeout(() => {
+        const q = (document.getElementById('offboardingSearch').value || '').trim();
+        const params = new URLSearchParams(window.location.search);
+        if (q) params.set('q', q);
+        else params.delete('q');
+        params.set('lang', 'ar');
+        window.location.href = `${window.location.pathname}?${params.toString()}`;
+      }, 300);
     }
 
     // Close modals on outside click / ESC

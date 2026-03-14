@@ -90,7 +90,7 @@
       <div style="display: flex;column-gap: 20px;"> 
         <div class="card" style="width: 80%;">
       <div class="search-box">
-        <input type="text" id="offboardingSearch" placeholder="Search driver by name or Iqama..." oninput="filterOffboardingDrivers()">
+        <input type="text" id="offboardingSearch" value="{{ q or '' }}" placeholder="Search driver by name or Iqama..." oninput="filterOffboardingDrivers()">
       </div>
                     {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
@@ -157,12 +157,16 @@
     </div>
   </div>
     <script>
+    let opsCoordSearchTimer = null;
     function filterOffboardingDrivers() {
-      const query = (document.getElementById("offboardingSearch").value || "").toLowerCase();
-      document.querySelectorAll(".driver-card").forEach(card => {
-        const haystack = card.textContent.toLowerCase();
-        card.style.display = haystack.includes(query) ? "" : "none";
-      });
+      clearTimeout(opsCoordSearchTimer);
+      opsCoordSearchTimer = setTimeout(() => {
+        const query = (document.getElementById("offboardingSearch").value || "").trim();
+        const params = new URLSearchParams(window.location.search);
+        if (query) params.set('q', query);
+        else params.delete('q');
+        window.location.href = `${window.location.pathname}?${params.toString()}`;
+      }, 300);
     }
   </script>
 {% include 'includes/csrf_auto.html' %}
