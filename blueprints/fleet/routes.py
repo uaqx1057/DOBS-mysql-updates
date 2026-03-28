@@ -124,8 +124,6 @@ def dashboard_fleet():
         available_vehicles=available_vehicles,
         q=q,
     )
-
-
 # -------------------------
 # Assign Vehicle & Send to Next Stage
 # -------------------------
