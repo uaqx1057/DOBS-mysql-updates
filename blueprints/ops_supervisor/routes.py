@@ -484,13 +484,25 @@ def api_clear_offboarding(offboarding_id):
             "status": "Fleet",
         }
 
-        # -------------------------
-        # Update driver_business_ids to mark IDs as transferred
-        # -------------------------
-        DriverBusinessIDS.query.filter_by(
-            driver_id=record.driver_id,
-            transferred_at=None
-        ).update({"transferred_at": datetime.utcnow()}, synchronize_session=False)
+        if record.driver:
+            # Close active BusinessID history links for this driver.
+            DriverBusinessIDS.query.filter_by(
+                driver_id=record.driver_id,
+                transferred_at=None,
+            ).update({"transferred_at": cleared_at}, synchronize_session=False)
+
+            # Remove active business-driver links so businesses are fully unassigned.
+            BusinessDriver.query.filter_by(driver_id=record.driver_id).delete(synchronize_session=False)
+
+            # Keep legacy fields aligned for views still reading driver.platform/platform_id.
+            record.driver.platform = None
+            record.driver.platform_id = None
+
+            # If company assets were returned, clear issued mobile/device data on driver.
+            if bool(data.get("company_mobile_returned")) or bool(data.get("company_sim_returned")):
+                record.driver.mobile_issued = False
+                record.driver.issued_mobile_number = None
+                record.driver.issued_device_id = None
 
         Offboarding.query.filter_by(id=record.id).update(update_values, synchronize_session=False)
         db.session.commit()
