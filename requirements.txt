@@ -25,6 +25,9 @@ email-validator==2.2.0
 # i18n
 Flask-Babel==4.0.0
 Flask-Limiter==3.10.1
+Flask-Session==0.8.0
+Flask-Caching==2.3.0
+redis==5.2.1
 
 # Mail
 Flask-Mail==0.9.1

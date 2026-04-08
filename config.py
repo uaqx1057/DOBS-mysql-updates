@@ -11,6 +11,7 @@ UPLOAD_ROOT_DEFAULT = BASE_DIR / "static" / "uploads"
 MAIL_DEFAULT_NAME = "DOBS System"
 MAIL_DEFAULT_ADDRESS = "system@dobs.com"
 RATE_LIMIT_STORAGE_DEFAULT = "memory://"
+REDIS_URL_DEFAULT = ""
 
 
 class Config:
@@ -37,6 +38,24 @@ class Config:
     SESSION_COOKIE_SECURE = False
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
+    SESSION_PERMANENT = False
+
+    # Redis runtime backends
+    REDIS_URL = os.getenv("REDIS_URL", REDIS_URL_DEFAULT).strip()
+
+    # Feature flag: keep false if you want old memory/file behavior even with REDIS_URL set.
+    USE_REDIS_RUNTIME = os.getenv("USE_REDIS_RUNTIME", "true").lower() in {"1", "true", "yes", "on"}
+
+    # Flask-Session defaults (overridden at runtime when Redis is available)
+    SESSION_TYPE = os.getenv("SESSION_TYPE", "filesystem")
+    SESSION_FILE_DIR = os.getenv("SESSION_FILE_DIR") or str(BASE_DIR / "instance" / "flask_session")
+    SESSION_USE_SIGNER = True
+    SESSION_KEY_PREFIX = os.getenv("SESSION_KEY_PREFIX", "dobs:session:")
+
+    # Flask-Caching defaults (overridden at runtime when Redis is available)
+    CACHE_TYPE = os.getenv("CACHE_TYPE", "SimpleCache")
+    CACHE_DEFAULT_TIMEOUT = int(os.getenv("CACHE_DEFAULT_TIMEOUT", "120"))
+    CACHE_KEY_PREFIX = os.getenv("CACHE_KEY_PREFIX", "dobs:cache:")
 
     # CSRF
     WTF_CSRF_ENABLED = True
@@ -52,8 +71,8 @@ class Config:
 
     # Rate limiting
     RATELIMIT_DEFAULTS = "200 per hour;50 per minute"
-    RATELIMIT_STORAGE_URI = RATE_LIMIT_STORAGE_DEFAULT
-    RATELIMIT_STORAGE_URL = RATE_LIMIT_STORAGE_DEFAULT
+    RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", RATE_LIMIT_STORAGE_DEFAULT)
+    RATELIMIT_STORAGE_URL = os.getenv("RATELIMIT_STORAGE_URL", RATELIMIT_STORAGE_URI)
 
     # Two-factor auth (email OTP)
     TWO_FA_EMAIL_ENABLED = False

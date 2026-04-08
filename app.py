@@ -5,9 +5,9 @@ import json
 import logging
 import uuid
 import importlib.util
-from limits.errors import ConfigurationError
 from typing import TYPE_CHECKING
 from sqlalchemy import event
+import redis
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -16,7 +16,7 @@ from flask_limiter.errors import RateLimitExceeded
 from flask_login import logout_user
 from flask_wtf.csrf import CSRFError
 from config import Config
-from extensions import db, mail, login_manager, migrate, csrf, babel, limiter
+from extensions import db, mail, login_manager, migrate, csrf, babel, limiter, cache, server_session
 # Ensure models are registered with SQLAlchemy metadata for migrations
 import models  # noqa: F401
 
@@ -34,6 +34,51 @@ from blueprints.reports.routes import reports_bp
 
 
 
+def _resolve_runtime_backends(app: Flask):
+    """Use Redis when configured and reachable, otherwise keep legacy-safe local backends."""
+    redis_url = (app.config.get("REDIS_URL") or "").strip()
+    use_redis_runtime = bool(app.config.get("USE_REDIS_RUNTIME", True)) and bool(redis_url)
+
+    if use_redis_runtime:
+        try:
+            redis_client = redis.from_url(redis_url, socket_connect_timeout=1, socket_timeout=1)
+            redis_client.ping()
+
+            app.config["SESSION_TYPE"] = "redis"
+            app.config["SESSION_REDIS"] = redis_client
+            app.config["CACHE_TYPE"] = "RedisCache"
+            app.config["CACHE_REDIS_URL"] = redis_url
+
+            ratelimit_storage = app.config.get("RATELIMIT_STORAGE_URI") or app.config.get("RATELIMIT_STORAGE_URL")
+            if ratelimit_storage and str(ratelimit_storage).startswith("redis://"):
+                limiter_storage_uri = ratelimit_storage
+            else:
+                limiter_storage_uri = redis_url
+
+            app.logger.info("Redis runtime enabled for cache/session/limiter")
+            app.config["RUNTIME_BACKENDS"] = {
+                "mode": "redis",
+                "limiter": "redis",
+                "session": "redis",
+                "cache": "redis",
+                "redis_url_set": bool(redis_url),
+            }
+            return limiter_storage_uri
+        except Exception as exc:
+            app.logger.warning("Redis runtime unavailable, falling back to local backends: %s", exc)
+
+    app.config["SESSION_TYPE"] = app.config.get("SESSION_TYPE") or "filesystem"
+    app.config["CACHE_TYPE"] = app.config.get("CACHE_TYPE") or "SimpleCache"
+    app.config["RUNTIME_BACKENDS"] = {
+        "mode": "fallback",
+        "limiter": "memory",
+        "session": app.config["SESSION_TYPE"],
+        "cache": app.config["CACHE_TYPE"],
+        "redis_url_set": bool(redis_url),
+    }
+    return "memory://"
+
+
 def create_app():
     # --- Project root ---
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -47,6 +92,8 @@ def create_app():
     app.config.from_object(Config)
     app.secret_key = app.config.get("SECRET_KEY", "fallback_secret_key")
 
+    limiter_storage_uri = _resolve_runtime_backends(app)
+
     # Ensure upload root exists
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
@@ -56,14 +103,16 @@ def create_app():
     login_manager.init_app(app)
     migrate.init_app(app, db)
     csrf.init_app(app)
+    cache.init_app(app)
+    server_session.init_app(app)
 
     # Configure rate limiting from config/env for flexibility
     default_limits_raw = app.config.get("RATELIMIT_DEFAULTS")
     if default_limits_raw:
         app.config["RATELIMIT_DEFAULT"] = default_limits_raw
 
-    # Force in-memory rate limiting on this host to avoid redis prerequisite issues.
-    storage_uri = "memory://"
+    # Configure rate limiter storage based on runtime backend resolution.
+    storage_uri = limiter_storage_uri
     for key in [
         "RATELIMIT_STORAGE_URI",
         "RATELIMIT_STORAGE_URL",
@@ -71,7 +120,7 @@ def create_app():
         "FLASK_LIMITER_STORAGE_URI",
         "FLASK_LIMITER_STORAGE_URL",
     ]:
-        os.environ.pop(key, None)
+        os.environ[key] = storage_uri
         app.config[key] = storage_uri
 
     # Hard override the limiter instance to avoid any env-driven redis config.
@@ -226,6 +275,10 @@ def create_app():
     @app.route("/healthz")
     def healthz():
         return {"status": "ok"}, 200
+
+    @app.route("/ops/runtime-backends")
+    def runtime_backends():
+        return app.config.get("RUNTIME_BACKENDS", {"mode": "unknown"}), 200
 
     # --- Set language route ---
     @app.route("/set_language/<lang>")

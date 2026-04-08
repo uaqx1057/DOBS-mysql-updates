@@ -1,0 +1,17 @@
+[Unit]
+Description=DOBS Gunicorn Service
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/dobs/current
+EnvironmentFile=/var/www/dobs/current/.env
+ExecStart=/var/www/dobs/current/.venv/bin/gunicorn -w 8 -k gthread --threads 4 --timeout 90 --bind 127.0.0.1:8001 passenger_wsgi:application
+Restart=always
+RestartSec=3
+StandardOutput=append:/var/log/gunicorn/dobs-access.log
+StandardError=append:/var/log/gunicorn/dobs-error.log
+
+[Install]
+WantedBy=multi-user.target

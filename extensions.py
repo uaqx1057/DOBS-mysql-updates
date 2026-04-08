@@ -6,6 +6,8 @@ from flask_wtf import CSRFProtect
 from flask_babel import Babel
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_caching import Cache
+from flask_session import Session
 
 db = SQLAlchemy()
 mail = Mail()
@@ -14,5 +16,7 @@ login_manager.login_view = "auth.login"
 migrate = Migrate()
 csrf = CSRFProtect()
 babel = Babel()
+cache = Cache(config={"CACHE_TYPE": "SimpleCache"})
+server_session = Session()
 # Default to in-memory storage; overridden by app config if a supported backend is available.
 limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
