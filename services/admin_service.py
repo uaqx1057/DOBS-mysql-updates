@@ -3,6 +3,8 @@ from typing import Iterable, Optional
 
 from extensions import db
 from models import (
+    AssignDriver,
+    AssignDriverReport,
     BusinessDriver,
     BusinessID,
     Driver,
@@ -16,6 +18,17 @@ from werkzeug.security import generate_password_hash
 
 
 DEFAULT_DRIVER_PASSWORD = "12344321"
+
+
+def _normalize_onboarding_stage(value):
+    if value in (None, ""):
+        return value
+
+    text = str(value).strip()
+    key = text.lower().replace(" ", "")
+    if key in {"fleet", "fleetmanager"}:
+        return "Fleet Manager"
+    return text
 
 
 def _to_bool(value) -> bool:
@@ -65,6 +78,8 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
             setattr(driver, field, _to_bool(value))
         elif field in date_fields:
             setattr(driver, field, _parse_date_value(value))
+        elif field == "onboarding_stage":
+            setattr(driver, field, _normalize_onboarding_stage(value))
         elif field == "transfer_fee_amount":
             try:
                 setattr(driver, field, float(value) if value not in (None, "") else None)
@@ -73,7 +88,7 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
         else:
             setattr(driver, field, value)
 
-    if form_data.get("onboarding_stage") == "Completed":
+    if driver.onboarding_stage == "Completed":
         driver.password = generate_password_hash(DEFAULT_DRIVER_PASSWORD)
 
     # --- Unify assignment logic with DMS ---
@@ -170,7 +185,14 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
 
 def delete_driver_and_offboarding(driver_id: int):
     driver = Driver.query.get_or_404(driver_id)
+
+    # Remove dependent rows that can block driver deletion via FK constraints.
+    AssignDriver.query.filter_by(driver_id=driver.id).delete(synchronize_session=False)
+    AssignDriverReport.query.filter_by(driver_id=driver.id).delete(synchronize_session=False)
     Offboarding.query.filter_by(driver_id=driver.id).delete()
+    DriverBusinessIDS.query.filter_by(driver_id=driver.id).delete(synchronize_session=False)
+    BusinessDriver.query.filter_by(driver_id=driver.id).delete(synchronize_session=False)
+
     db.session.delete(driver)
     db.session.commit()
 

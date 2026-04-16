@@ -237,6 +237,12 @@ def create_app():
             response.headers["X-Request-Duration-ms"] = str(duration_ms)
         if getattr(g, "request_id", None):
             response.headers["X-Request-ID"] = g.request_id
+
+        # Avoid stale dashboard HTML/JS in browsers after hotfix deployments.
+        if request.path.startswith("/dashboard"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
         return response
 
     @app.errorhandler(RateLimitExceeded)

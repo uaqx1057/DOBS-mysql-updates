@@ -95,12 +95,14 @@ class Config:
     WTF_CSRF_ENABLED = True
 
     # Mail settings
-    MAIL_SERVER = "localhost"
-    MAIL_PORT = 587
-    MAIL_USE_TLS = True
-    MAIL_USE_SSL = False
-    MAIL_USERNAME = "system@dobs.com"
-    MAIL_PASSWORD = "change-me"
+    MAIL_SERVER = _env_or_file("MAIL_SERVER", "localhost")
+    MAIL_PORT = int(_env_or_file("MAIL_PORT", "587"))
+    MAIL_USE_TLS = _env_bool("MAIL_USE_TLS", True)
+    MAIL_USE_SSL = _env_bool("MAIL_USE_SSL", False)
+    MAIL_USERNAME = _env_or_file("MAIL_USERNAME", "system@dobs.com")
+    MAIL_PASSWORD = _env_or_file("MAIL_PASSWORD", "change-me")
+    MAIL_DEFAULT_NAME = _env_or_file("MAIL_DEFAULT_NAME", MAIL_DEFAULT_NAME)
+    MAIL_DEFAULT_ADDRESS = _env_or_file("MAIL_DEFAULT_ADDRESS", MAIL_DEFAULT_ADDRESS)
     MAIL_DEFAULT_SENDER = (MAIL_DEFAULT_NAME, MAIL_DEFAULT_ADDRESS)
 
     # Rate limiting

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session , current_app
+from flask import Flask, render_template, request, redirect, url_for, flash, session , current_app, jsonify
 from flask_login import login_required, current_user
 from models import Business, DriverBusinessIDS, Offboarding, db, Driver, User, BusinessID, BusinessDriver
 from extensions import db, mail, limiter
@@ -78,6 +78,16 @@ def safe_datetime(value):
     except Exception:
         return value
 
+
+def normalize_onboarding_stage(value):
+    if value in (None, ""):
+        return value
+    text = str(value).strip()
+    key = text.lower().replace(" ", "")
+    if key in {"fleet", "fleetmanager"}:
+        return "Fleet Manager"
+    return text
+
 # -------------------------
 # SuperAdmin Dashboard
 # -------------------------
@@ -155,6 +165,7 @@ def dashboard():
     # Helper: serialize drivers
     # -------------------------
     def serialize_driver(d, offboarding_record=None):
+        normalized_stage = normalize_onboarding_stage(d.onboarding_stage)
         data = {
             "id": d.id,
             "name": d.name,
@@ -188,7 +199,7 @@ def dashboard():
             "tamm_authorization_ss": d.tamm_authorization_ss,
             "tamm_authorized": bool(d.tamm_authorized),
             "sponsorship_transfer_status": d.sponsorship_transfer_status,
-            "onboarding_stage": d.onboarding_stage,
+            "onboarding_stage": normalized_stage,
             "company_contract_file": d.company_contract_file,
             "promissory_note_file": d.promissory_note_file,
             "qiwa_contract_file": d.qiwa_contract_file,
@@ -199,7 +210,7 @@ def dashboard():
             "sponsorship_transfer_proof_url": url_for("static", filename=f"uploads/{d.sponsorship_transfer_proof}") if d.sponsorship_transfer_proof else "",
             "tamm_authorization_ss_url": url_for("static", filename=f"uploads/{d.tamm_authorization_ss}") if d.tamm_authorization_ss else "",
             "offboarding_stage": d.offboarding_stage or (offboarding_record.status if offboarding_record else None),
-            "fully_onboarded": d.onboarding_stage == "Completed",
+            "fully_onboarded": normalized_stage == "Completed",
             "in_offboarding": d.id in in_offboarding_ids,
             "offboard_requested_by":d.offboard_requested_by if offboarding_record else None,
             "offboard_reason": d.offboard_reason if offboarding_record else None,
@@ -369,7 +380,7 @@ def driver_json(driver_id):
         "transfer_fee_amount": driver.transfer_fee_amount,
         "transfer_fee_paid_at": driver.transfer_fee_paid_at.isoformat() if driver.transfer_fee_paid_at else None,
         "qiwa_contract_status": driver.qiwa_contract_status,
-        "onboarding_stage": driver.onboarding_stage,
+        "onboarding_stage": normalize_onboarding_stage(driver.onboarding_stage),
         # file URLs
         "iqama_card_upload_url": url_for("static", filename=f"uploads/{driver.iqama_card_upload}") if driver.iqama_card_upload else "",
         "tamm_authorization_ss_url": getattr(driver, "tamm_authorization_ss_url", ""),
@@ -492,18 +503,25 @@ def update_driver(driver_id):
 @login_required
 def delete_driver(driver_id):
     from app import db
-    from models import Driver, Offboarding
+
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
+        if is_ajax:
+            return jsonify({"ok": False, "message": "Invalid request."}), 400
         flash("Invalid request.", "danger")
         return redirect(url_for("admin.dashboard"))
 
     try:
         delete_driver_and_offboarding(driver_id)
+        if is_ajax:
+            return jsonify({"ok": True, "message": "Driver deleted successfully."}), 200
         flash("Driver and related offboarding records deleted successfully.", "success")
     except Exception as e:
         db.session.rollback()
+        if is_ajax:
+            return jsonify({"ok": False, "message": f"Error deleting driver: {str(e)}"}), 500
         flash(f"Error deleting driver: {str(e)}", "danger")
 
     return redirect(url_for("admin.dashboard"))

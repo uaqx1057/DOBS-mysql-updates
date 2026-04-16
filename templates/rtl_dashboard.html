@@ -1130,7 +1130,7 @@ function openViewModal(e) {
                     <option value="Ops Manager">مدير العمليات</option>
                     <option value="HR">الموارد البشرية</option>
                     <option value="Ops Supervisor">مشرف العمليات</option>
-                    <option value="Fleet">أسطول</option>
+                    <option value="Fleet Manager">مدير الأسطول</option>
                     <option value="Rejected">مرفوض</option>
                     <option value="Finance">المالية</option>
                     <option value="HR Final">الموارد البشرية النهائية</option>
@@ -1300,7 +1300,8 @@ function openViewModal(e) {
           document.getElementById('edit_transfer_fee_amount').value = d.transfer_fee_amount || '';
           if(d.transfer_fee_paid_at) document.getElementById('edit_transfer_fee_paid_at').value = d.transfer_fee_paid_at;
           document.getElementById('edit_qiwa_contract_status').value = d.qiwa_contract_status || '';
-          document.getElementById('edit_onboarding_stage').value = d.onboarding_stage || '';
+          const stage = (d.onboarding_stage === 'Fleet') ? 'Fleet Manager' : (d.onboarding_stage || '');
+          document.getElementById('edit_onboarding_stage').value = stage;
 
           // Show current files as links
           function showFileLink(divId, url) {
