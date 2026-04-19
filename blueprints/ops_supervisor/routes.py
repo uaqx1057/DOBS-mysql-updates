@@ -471,16 +471,25 @@ def api_clear_offboarding(offboarding_id):
     try:
         data = request.get_json(silent=True) or {}
         driver_name = record.driver.name if record.driver else "Driver"
+        company_mobile_returned = bool(data.get("company_mobile_returned"))
+        company_sim_returned = bool(data.get("company_sim_returned"))
+        platform_returned = bool(data.get("platform_returned"))
+        base_note = (data.get("ops_supervisor_note") or "").strip()
+
+        # Persist returned-assets state in the existing note field because
+        # the Offboarding model/table does not have dedicated boolean columns.
+        assets_summary = (
+            f"Company Mobile Returned: {'Yes' if company_mobile_returned else 'No'}; "
+            f"Company SIM Returned: {'Yes' if company_sim_returned else 'No'}; "
+            f"Platform Returned: {'Yes' if platform_returned else 'No'}"
+        )
+        combined_note = f"{base_note}\n{assets_summary}".strip() if base_note else assets_summary
 
         cleared_at = datetime.utcnow()
         update_values = {
             "ops_supervisor_cleared": True,
             "ops_supervisor_cleared_at": cleared_at,
-            "company_mobile_returned": bool(data.get("company_mobile_returned")),
-            "company_sim_returned": bool(data.get("company_sim_returned")),
-            "platform_returned": bool(data.get("platform_returned")),
-            "ops_supervisor_note": data.get("ops_supervisor_note", ""),
-            "ops_supervisor_id": current_user.id,
+            "ops_supervisor_note": combined_note,
             "status": "Fleet",
         }
 
@@ -499,7 +508,7 @@ def api_clear_offboarding(offboarding_id):
             record.driver.platform_id = None
 
             # If company assets were returned, clear issued mobile/device data on driver.
-            if bool(data.get("company_mobile_returned")) or bool(data.get("company_sim_returned")):
+            if company_mobile_returned or company_sim_returned:
                 record.driver.mobile_issued = False
                 record.driver.issued_mobile_number = None
                 record.driver.issued_device_id = None
