@@ -8,7 +8,7 @@ def send_password_change_email(user, new_password):
         msg = Message(
             subject="Your Password Has Been Changed",
             recipients=[user.email],
-            sender="noreply@yourdomain.com"
+            sender=current_app.config.get("MAIL_DEFAULT_SENDER")
         )
         msg.body = f"""
 Hello {user.username},
@@ -26,7 +26,7 @@ DOBS System Team
         mail.send(msg)
         return True
     except Exception as e:
-        print(f"Error sending password change email: {e}")
+        current_app.logger.exception("Password change email failed: %s", e)
         return False
 
 
@@ -36,7 +36,7 @@ def _send_async_email(app, msg, logger=None):
             mail.send(msg)
         except Exception as exc:
             if logger:
-                logger.exception("Email send failed")
+                logger.exception("Email send failed: %s", exc)
             else:
                 print(f"Email send failed: {exc}")
 
@@ -53,7 +53,7 @@ def safe_send_email(msg: Message, logger=None, background=True):
         return True
     except Exception as exc:
         if logger:
-            logger.exception("Email send failed")
+            logger.exception("Email send failed: %s", exc)
         else:
             print(f"Email send failed: {exc}")
         return False
