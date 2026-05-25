@@ -1,0 +1,13 @@
+cd /home/dobsykjq/dobs
+put blueprints/fleet/routes.py blueprints/fleet/routes.py
+put forms/common.py forms/common.py
+put templates/dashboard_fleet.html templates/dashboard_fleet.html
+put templates/rtl_dashboard_fleet.html templates/rtl_dashboard_fleet.html
+-mkdir tmp
+put tmp/deploy_dobs_passenger_restart.txt tmp/restart.txt
+ls -l blueprints/fleet/routes.py
+ls -l forms/common.py
+ls -l templates/dashboard_fleet.html
+ls -l templates/rtl_dashboard_fleet.html
+ls -l tmp/restart.txt
+bye

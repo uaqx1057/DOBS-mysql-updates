@@ -157,6 +157,7 @@ class FleetAssignForm(FlaskForm):
 class FleetOffboardingForm(FlaskForm):
     fleet_damage_report = StringField("Damage Report", validators=[Optional(), Length(max=500)])
     fleet_damage_cost = StringField("Damage Cost", validators=[Optional(), Length(max=50)])
+    car_returned = BooleanField("Car Returned")
     tamm_revoked = BooleanField("TAMM Revoked")
     finalize = BooleanField("Finalize")
     finance_cleared = BooleanField("Finance Cleared")

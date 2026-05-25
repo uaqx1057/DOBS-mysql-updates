@@ -564,9 +564,15 @@ def add_user():
         return redirect(url_for("admin.dashboard"))
 
     # Send email notification
-    # Send email notification
+    sender = current_app.config.get("MAIL_DEFAULT_SENDER")
+    email_sent = False
+
     try:
-        msg = Message("Your Account Has Been Created | تم إنشاء حسابك", recipients=[email])
+        msg = Message(
+            "Your Account Has Been Created | تم إنشاء حسابك",
+            recipients=[email],
+            sender=sender,
+        )
         msg.html = f"""
         <html dir="ltr" lang="en">
         <body style="font-family: Arial, sans-serif; color: #333; background-color: #f8f9fa; padding: 20px;">
@@ -617,10 +623,23 @@ def add_user():
         </html>
         """
         mail.send(msg)
+        email_sent = True
     except Exception as e:
-        flash(f"User created but email failed: {e}", "warning")
+        current_app.logger.exception(
+            "Welcome email failed for new user id=%s email=%s: %s",
+            new_user.id,
+            email,
+            e,
+        )
+        flash(f"User created, but the welcome email failed: {e}", "warning")
 
-    flash("User created successfully and email sent.", "success")
+    if email_sent:
+        current_app.logger.info(
+            "Welcome email accepted by mail server for new user id=%s email=%s",
+            new_user.id,
+            email,
+        )
+        flash("User created successfully and welcome email was accepted by the mail server.", "success")
     return redirect(url_for("admin.dashboard"))
 
 # -------------------------

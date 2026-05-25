@@ -424,6 +424,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const payload = {
       fleet_damage_report: document.getElementById("damageReport").value,
       fleet_damage_cost: document.getElementById("damageCost").value,
+      car_returned: document.getElementById("carReturned").checked,
       tamm_revoked: document.getElementById("tammRevoked").checked,
       finalize: false,
       finance_cleared: false
@@ -434,7 +435,10 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const res = await fetch(`/dashboard/fleet/api/offboarding_action/${currentOffboardingId}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": "{{ csrf_token() }}"
+        },
         body: JSON.stringify(payload)
       });
 

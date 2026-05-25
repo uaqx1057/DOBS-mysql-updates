@@ -23,6 +23,27 @@ def _upload_root() -> str:
     os.makedirs(path, exist_ok=True)
     return path
 
+
+def _public_page_response(filename: str):
+    page_path = os.path.join(current_app.root_path, filename)
+    if not os.path.exists(page_path):
+        return None
+
+    resp = make_response(send_from_directory(current_app.root_path, filename))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return resp
+
+
+def _resolve_next_page(default_endpoint: str) -> str:
+    next_page = (request.args.get("next") or "").strip()
+    if next_page.startswith("/") and not next_page.startswith("//"):
+        return next_page
+
+    if request.referrer:
+        return request.referrer
+
+    return url_for(default_endpoint)
+
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -41,10 +62,9 @@ def validate_english(value, field_name):
 def index():
     lang = session.get("lang", "en")
     filename = "rtl_index.html" if lang == "ar" else "index.html"
-    if not os.path.exists(filename):
+    resp = _public_page_response(filename)
+    if resp is None:
         return "Front page not found", 404
-    resp = make_response(send_from_directory('.', filename))
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
 
 
@@ -55,10 +75,9 @@ def index():
 def serve_page(page_name):
     lang = session.get("lang", "en")
     filename = f"rtl_{page_name}.html" if lang == "ar" else f"{page_name}.html"
-    if not os.path.exists(filename):
+    resp = _public_page_response(filename)
+    if resp is None:
         return "Page not found", 404
-    resp = make_response(send_from_directory('.', filename))
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return resp
 
 
@@ -218,5 +237,5 @@ def register():
 def set_language(lang):
     if lang in ["en", "ar"]:
         session["lang"] = lang
-    next_page = request.referrer or url_for("public.index")
+    next_page = _resolve_next_page("public.index")
     return redirect(next_page)

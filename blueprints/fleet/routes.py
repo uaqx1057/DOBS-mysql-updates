@@ -31,6 +31,54 @@ def _validate_csrf():
     form = CSRFOnlyForm()
     return form.validate_on_submit()
 
+
+def _release_driver_vehicle_assignments(driver, released_at):
+    active_assignments = (
+        AssignDriver.query
+        .filter_by(driver_id=driver.id, status="active")
+        .order_by(AssignDriver.id.desc())
+        .all()
+    )
+
+    if not active_assignments:
+        driver.car_details = None
+        driver.assignment_date = None
+        driver.tamm_authorized = False
+        return 0
+
+    vehicle_ids = []
+    for assignment in active_assignments:
+        assignment.status = "inactive"
+        vehicle_ids.append(assignment.vehicle_id)
+
+        if assignment.vehicle:
+            assignment.vehicle.status = "available"
+
+    unique_vehicle_ids = sorted(set(vehicle_ids))
+    if unique_vehicle_ids:
+        (
+            AssignDriverReport.query
+            .filter(
+                AssignDriverReport.driver_id == driver.id,
+                AssignDriverReport.vehicle_id.in_(unique_vehicle_ids),
+                AssignDriverReport.status == "assign",
+                AssignDriverReport.unassign_date.is_(None),
+            )
+            .update(
+                {
+                    AssignDriverReport.unassign_date: released_at,
+                    AssignDriverReport.status: "unassign",
+                },
+                synchronize_session=False,
+            )
+        )
+
+    driver.car_details = None
+    driver.assignment_date = None
+    driver.tamm_authorized = False
+
+    return len(active_assignments)
+
 # -------------------------
 # Fleet Manager Dashboard
 # -------------------------
@@ -347,8 +395,33 @@ def offboarding_action(offboarding_id):
         now = datetime.utcnow()
         fleet_damage_report = data.get("fleet_damage_report")
         fleet_damage_cost = float(data.get("fleet_damage_cost") or 0)
+        car_returned = bool(data.get("car_returned"))
         tamm_revoked = bool(data.get("tamm_revoked")) or bool(record.tamm_revoked)
         tamm_revoked_at = now if data.get("tamm_revoked") else record.tamm_revoked_at
+        active_assignment_count = 0
+        released_assignment_count = 0
+
+        if record.driver_id:
+            active_assignment_count = (
+                AssignDriver.query
+                .filter_by(driver_id=record.driver_id, status="active")
+                .count()
+            )
+
+        if active_assignment_count and not car_returned:
+            return jsonify({
+                "success": False,
+                "message": "Car must be marked returned before fleet offboarding can continue for a driver with an active vehicle assignment.",
+            }), 400
+
+        if record.driver and car_returned:
+            released_assignment_count = _release_driver_vehicle_assignments(record.driver, now)
+            current_app.logger.info(
+                "[FLEET OFFBOARDING] Released %s active assignment(s) for driver_id=%s during offboarding_id=%s",
+                released_assignment_count,
+                record.driver_id,
+                record.id,
+            )
 
         base_updates = {
             "fleet_cleared": True,
@@ -438,7 +511,11 @@ def offboarding_action(offboarding_id):
 
 
 
-            return jsonify({"success": True, "message": f"Driver {driver_name} fully offboarded."})
+            return jsonify({
+                "success": True,
+                "message": f"Driver {driver_name} fully offboarded.",
+                "released_assignment_count": released_assignment_count,
+            })
 
         else:
             # Send to FinanceManager
@@ -533,7 +610,8 @@ def offboarding_action(offboarding_id):
                 "cleared_at": now.strftime("%Y-%m-%d %H:%M"),
                 "damage_cost": fleet_damage_cost,
                 "damage_report": fleet_damage_report,
-                "tamm_revoked_at": tamm_revoked_at.strftime("%Y-%m-%d %H:%M") if tamm_revoked_at else None
+                "tamm_revoked_at": tamm_revoked_at.strftime("%Y-%m-%d %H:%M") if tamm_revoked_at else None,
+                "released_assignment_count": released_assignment_count,
             })
 
     except Exception as e:
