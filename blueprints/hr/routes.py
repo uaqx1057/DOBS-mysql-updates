@@ -351,15 +351,17 @@ def complete_sponsorship_transfer(driver_id):
     driver = Driver.query.get_or_404(driver_id)
 
     try:
+        completed_at = datetime.utcnow()
+
         # Determine current case
         if not driver.qiwa_contract_created:
             # 🔹 Case 1: Driver has NO Qiwa contract
-            driver.onboarding_stage = "Completed"
+            driver.mark_completed_onboarding(completed_at)
             _ensure_driver_code(driver)
             _set_default_driver_password(driver)
             driver.sponsorship_transfer_status = "Not Required"
             driver.sponsorship_transfer_proof = None
-            driver.sponsorship_transfer_completed_at = datetime.utcnow()
+            driver.sponsorship_transfer_completed_at = completed_at
             db.session.commit()
 
             flash(f"✅ Driver {driver.name} marked as completed (no Qiwa contract).", "success")
@@ -370,7 +372,8 @@ def complete_sponsorship_transfer(driver_id):
             try:
                 max_bytes = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
                 save_transfer_proof(driver, file, _upload_root(), transfer_status, max_bytes)
-                driver.onboarding_stage = "Completed"
+                driver.sponsorship_transfer_completed_at = completed_at
+                driver.mark_completed_onboarding(completed_at)
                 _ensure_driver_code(driver)
                 _set_default_driver_password(driver)
                 db.session.commit()
@@ -478,12 +481,13 @@ def complete_driver(driver_id):
 
     # Only for drivers without a Qiwa contract
     if not driver.qiwa_contract_created:
-        driver.onboarding_stage = "Completed"
+        completed_at = datetime.utcnow()
+        driver.mark_completed_onboarding(completed_at)
         _ensure_driver_code(driver) 
         _set_default_driver_password(driver)
         driver.sponsorship_transfer_status = "Not Required"
         driver.sponsorship_transfer_proof = None
-        driver.sponsorship_transfer_completed_at = datetime.utcnow()
+        driver.sponsorship_transfer_completed_at = completed_at
         db.session.commit()
         flash(f"✅ Driver {driver.name} marked as completed (no Qiwa contract).", "success")
     else:

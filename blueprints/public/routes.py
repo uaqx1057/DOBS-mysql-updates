@@ -144,6 +144,8 @@ def register():
 
         db.session.add(new_driver)
         try:
+            db.session.flush()
+            new_driver.ensure_shared_driver_defaults()
             db.session.commit()
         except IntegrityError as e:
             db.session.rollback()

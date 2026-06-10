@@ -218,6 +218,54 @@ class Driver(db.Model):
         self.finance_approved_at = datetime.utcnow()
         self.onboarding_stage = "Completed"
 
+    def ensure_shared_driver_defaults(self, created_at: datetime | None = None):
+        self._sync_shared_driver_fields(created_at=created_at or datetime.utcnow())
+
+    def mark_completed_onboarding(self, completed_at: datetime | None = None):
+        completed_at = completed_at or datetime.utcnow()
+        self.finance_approved_at = self.finance_approved_at or completed_at
+        self.sponsorship_transfer_completed_at = self.sponsorship_transfer_completed_at or completed_at
+        self.onboarding_stage = "Completed"
+        self._sync_shared_driver_fields(
+            created_at=completed_at,
+            onboarding_completed_at=completed_at,
+            status="Active",
+        )
+
+    def _sync_shared_driver_fields(
+        self,
+        *,
+        created_at: datetime | None = None,
+        onboarding_completed_at: datetime | None = None,
+        status: str | None = None,
+    ):
+        if not self.id:
+            return
+
+        bind = db.session.get_bind() or db.engine
+        columns = {column["name"] for column in sa.inspect(bind).get_columns(self.__tablename__)}
+
+        assignments = []
+        params = {"driver_id": self.id}
+
+        if created_at is not None and "created_at" in columns:
+            assignments.append("created_at = COALESCE(created_at, :created_at)")
+            params["created_at"] = created_at
+
+        if onboarding_completed_at is not None and "onboarding_completed_at" in columns:
+            assignments.append("onboarding_completed_at = COALESCE(onboarding_completed_at, :onboarding_completed_at)")
+            params["onboarding_completed_at"] = onboarding_completed_at
+
+        if status is not None and "status" in columns:
+            assignments.append("status = CASE WHEN status IS NULL OR TRIM(status) = '' OR LOWER(status) = 'inactive' THEN :status ELSE status END")
+            params["status"] = status
+
+        if assignments:
+            db.session.execute(
+                sa.text(f"UPDATE drivers SET {', '.join(assignments)} WHERE id = :driver_id"),
+                params,
+            )
+
     def hr_files_complete(self):
         """Check if required HR files are uploaded and Qiwa contract created"""
         return bool(
