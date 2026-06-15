@@ -1,0 +1,74 @@
+{% set is_ar = (current_lang or 'en') == 'ar' %}
+<!DOCTYPE html>
+<html lang="{{ 'ar' if is_ar else 'en' }}" dir="{{ 'rtl' if is_ar else 'ltr' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Error — DOBS</title>
+    <link rel="icon" type="image/webp" href="{{ url_for('static', filename='Home_09_Onepage_files/logo1.webp') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dobs-theme.css') }}">
+    <style>
+        .sso-error-wrap {
+            display: flex; align-items: center; justify-content: center;
+            min-height: 100vh;
+        }
+        .sso-error-card {
+            background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.13);
+            border-radius: 18px;
+            padding: 48px 40px;
+            max-width: 440px;
+            width: 100%;
+            text-align: center;
+            backdrop-filter: blur(12px);
+        }
+        .sso-error-icon {
+            font-size: 56px;
+            color: #f87171;
+            margin-bottom: 16px;
+        }
+        .sso-error-title {
+            font-size: 1.35rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+        .sso-error-msg {
+            color: rgba(255,255,255,.65);
+            font-size: .93rem;
+            margin-bottom: 28px;
+            line-height: 1.6;
+        }
+        .sso-error-btn {
+            display: inline-block;
+            padding: 10px 28px;
+            background: linear-gradient(135deg, #6366f1, #a855f7);
+            color: #fff;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: .9rem;
+            text-decoration: none;
+            transition: opacity .2s;
+        }
+        .sso-error-btn:hover { opacity: .85; color: #fff; }
+    </style>
+</head>
+<body class="dobs-theme" dir="{{ 'rtl' if is_ar else 'ltr' }}">
+    <div class="dobs-orb dobs-orb--gold"></div>
+    <div class="dobs-orb dobs-orb--violet"></div>
+    <div class="dobs-orb dobs-orb--pink"></div>
+
+    <div class="sso-error-wrap">
+        <div class="sso-error-card">
+            <div class="sso-error-icon">&#128274;</div>
+            <div class="sso-error-title">
+                {{ 'SSO Login Failed' if not is_ar else 'فشل تسجيل الدخول التلقائي' }}
+            </div>
+            <p class="sso-error-msg">{{ message }}</p>
+            <a href="{{ hr_url }}" class="sso-error-btn">
+                &#8592; {{ 'Return to HR Portal' if not is_ar else 'العودة إلى بوابة الموارد البشرية' }}
+            </a>
+        </div>
+    </div>
+</body>
+</html>

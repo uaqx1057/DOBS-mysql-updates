@@ -31,6 +31,7 @@ from blueprints.ops_supervisor.routes import ops_supervisor_bp
 from blueprints.fleet.routes import fleet_bp
 from blueprints.finance.routes import finance_bp
 from blueprints.reports.routes import reports_bp
+from blueprints.sso import sso_bp
 
 
 
@@ -217,6 +218,7 @@ def create_app():
     app.register_blueprint(fleet_bp, url_prefix="/dashboard/fleet")
     app.register_blueprint(finance_bp, url_prefix="/dashboard/finance")
     app.register_blueprint(reports_bp, url_prefix="/reports")
+    app.register_blueprint(sso_bp)
 
     # --- Default language before request ---
     @app.before_request
