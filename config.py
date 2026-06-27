@@ -58,6 +58,7 @@ class Config:
 
     # File upload settings (keep under static/uploads for serving)
     UPLOAD_FOLDER = str(UPLOAD_ROOT_DEFAULT)
+    DRIVER_DOCUMENT_PATH = _env_or_file("DRIVER_DOCUMENT_PATH", str(UPLOAD_ROOT_DEFAULT))
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB
     ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "pdf"}
     UPLOAD_CDN_BASE = None

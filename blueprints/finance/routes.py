@@ -9,7 +9,8 @@ from flask_mail import Message
 from sqlalchemy import exists
 from sqlalchemy import or_
 from extensions import db, mail, limiter
-from models import Driver, User, Offboarding
+from models import Driver, User, Offboarding, DriverDocument
+from services.file_storage import save_to_shared_storage
 from utils.email_utils import send_password_change_email, safe_send_email
 from flask_wtf.csrf import validate_csrf, CSRFError
 from forms.common import (
@@ -245,6 +246,26 @@ def approve_driver(driver_id):
         filename = make_safe_filename(driver, "transfer_receipt", file.filename)
         file.save(os.path.join(upload_folder, secure_filename(filename)))
         driver.transfer_fee_receipt = filename
+
+        # Dual-write to shared driver_documents store
+        try:
+            shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH", upload_folder)
+            file.stream.seek(0)
+            relative_path = save_to_shared_storage(file, driver.id, "other", shared_root)
+            file.stream.seek(0, 2)
+            doc = DriverDocument(
+                driver_id     = driver.id,
+                document_type = "other",
+                file_path     = relative_path,
+                original_name = file.filename,
+                file_size     = file.stream.tell(),
+                uploaded_from = "dobs",
+                uploaded_by   = current_user.id,
+                notes         = "transfer_fee_receipt",
+            )
+            db.session.add(doc)
+        except Exception:
+            current_app.logger.exception("Shared storage dual-write failed for transfer_fee_receipt")
 
     # Mark driver as finance approved
     driver.transfer_fee_paid = True

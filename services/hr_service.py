@@ -2,17 +2,44 @@ import os
 from datetime import datetime
 from typing import Dict
 
+from flask import current_app
 from flask_mail import Message
 
-from services.file_storage import is_allowed_file, save_upload, safe_ext_filename, validate_upload
+from services.file_storage import is_allowed_file, save_upload, safe_ext_filename, validate_upload, save_to_shared_storage
 from models import QIWA_CONTRACT_STATUSES, TRANSFER_STATUSES
 
+# Maps Driver column names used in HR approval -> shared document_type
+_HR_FIELD_TO_DOC_TYPE = {
+    "company_contract_file": "contract",
+    "promissory_note_file":  "other",
+    "qiwa_contract_file":    "contract",
+}
 
-def process_hr_approval(driver, files: Dict[str, object], form_data: Dict[str, object], upload_folder: str, max_bytes: int):
-    """Handle HR approval: save files, update flags and stage."""
+
+def _insert_driver_document(db, driver, document_type: str, file_storage, relative_path: str, uploaded_by_id=None):
+    from models import DriverDocument
+    file_storage.stream.seek(0, 2)
+    size = file_storage.stream.tell()
+    file_storage.stream.seek(0)
+    doc = DriverDocument(
+        driver_id     = driver.id,
+        document_type = document_type,
+        file_path     = relative_path,
+        original_name = file_storage.filename,
+        file_size     = size,
+        uploaded_from = "dobs",
+        uploaded_by   = uploaded_by_id,
+    )
+    db.session.add(doc)
+
+
+def process_hr_approval(driver, files: Dict[str, object], form_data: Dict[str, object], upload_folder: str, max_bytes: int, db=None, uploaded_by_id=None):
+    """Handle HR approval: save files to legacy location and dual-write to shared storage."""
     base_name = (driver.name or "driver").replace(" ", "_")
     iqama = driver.iqaama_number or "unknown"
     prefix = f"{base_name}_{iqama}"
+
+    shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH", upload_folder)
 
     for db_field, file_storage in files.items():
         if file_storage and getattr(file_storage, "filename", None):
@@ -21,6 +48,14 @@ def process_hr_approval(driver, files: Dict[str, object], form_data: Dict[str, o
             filename = safe_ext_filename(prefix, db_field, original)
             save_upload(file_storage, upload_folder, filename)
             setattr(driver, db_field, filename)
+
+            if db is not None and driver.id:
+                doc_type = _HR_FIELD_TO_DOC_TYPE.get(db_field, "other")
+                try:
+                    relative_path = save_to_shared_storage(file_storage, driver.id, doc_type, shared_root)
+                    _insert_driver_document(db, driver, doc_type, file_storage, relative_path, uploaded_by_id)
+                except Exception:
+                    current_app.logger.exception("Shared storage dual-write failed for field %s", db_field)
 
     driver.qiwa_contract_created = bool(form_data.get("qiwa_contract_created"))
     driver.company_contract_created = bool(form_data.get("company_contract_created"))
@@ -39,7 +74,7 @@ def process_hr_approval(driver, files: Dict[str, object], form_data: Dict[str, o
     driver.onboarding_stage = "Ops Supervisor"
 
 
-def save_transfer_proof(driver, file_storage, upload_folder: str, status: str, max_bytes: int):
+def save_transfer_proof(driver, file_storage, upload_folder: str, status: str, max_bytes: int, db=None, uploaded_by_id=None):
     if status != "Transferred":
         raise ValueError("Transfer status must be 'Transferred' when uploading proof.")
     validate_upload(file_storage, max_bytes)
@@ -52,6 +87,14 @@ def save_transfer_proof(driver, file_storage, upload_folder: str, status: str, m
     driver.sponsorship_transfer_status = status
     driver.sponsorship_transfer_proof = filename
     driver.sponsorship_transfer_completed_at = datetime.utcnow()
+
+    if db is not None and driver.id:
+        shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH", upload_folder)
+        try:
+            relative_path = save_to_shared_storage(file_storage, driver.id, "other", shared_root)
+            _insert_driver_document(db, driver, "other", file_storage, relative_path, uploaded_by_id)
+        except Exception:
+            current_app.logger.exception("Shared storage dual-write failed for transfer_proof")
 
 
 def send_rejection_email(mail, recipients, driver_name, driver_iqaama, nationality, reason, rejected_by):

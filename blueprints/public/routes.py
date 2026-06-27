@@ -2,7 +2,8 @@ import os
 import re
 from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, session, send_from_directory, make_response
 from extensions import db, mail, limiter
-from models import Driver, User
+from models import Driver, User, DriverDocument
+from services.file_storage import save_to_shared_storage
 from utils.validation import parse_date
 from flask_mail import Message
 from werkzeug.utils import secure_filename
@@ -147,6 +148,25 @@ def register():
             db.session.flush()
             new_driver.ensure_shared_driver_defaults()
             db.session.commit()
+
+            # Dual-write iqama to shared driver_documents store
+            try:
+                shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH", upload_folder)
+                iqama_card_upload.stream.seek(0)
+                relative_path = save_to_shared_storage(iqama_card_upload, new_driver.id, "iqama", shared_root)
+                iqama_card_upload.stream.seek(0, 2)
+                doc = DriverDocument(
+                    driver_id     = new_driver.id,
+                    document_type = "iqama",
+                    file_path     = relative_path,
+                    original_name = iqama_card_upload.filename,
+                    file_size     = iqama_card_upload.stream.tell(),
+                    uploaded_from = "dobs",
+                )
+                db.session.add(doc)
+                db.session.commit()
+            except Exception:
+                current_app.logger.exception("Shared storage dual-write failed for iqama registration")
         except IntegrityError as e:
             db.session.rollback()
             current_app.logger.exception("Public registration IntegrityError")

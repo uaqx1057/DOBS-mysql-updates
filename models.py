@@ -279,6 +279,35 @@ class Driver(db.Model):
 
 
 # =========================
+# Driver Document Model
+# =========================
+class DriverDocument(db.Model):
+    __tablename__ = "driver_documents"
+
+    id            = db.Column(db.Integer, primary_key=True)
+    driver_id     = db.Column(db.Integer, db.ForeignKey("drivers.id"), nullable=False, index=True)
+    document_type = db.Column(
+        db.Enum("iqama", "passport", "visa", "license", "medical", "contract", "mobile", "other"),
+        nullable=False,
+    )
+    file_path     = db.Column(db.String(500), nullable=False)
+    original_name = db.Column(db.String(255), nullable=True)
+    file_size     = db.Column(db.Integer, nullable=True)
+    uploaded_from = db.Column(db.Enum("dms", "dobs", "hr"), nullable=False, default="dobs")
+    uploaded_by   = db.Column(db.Integer, nullable=True)   # DOBS User.id
+    notes         = db.Column(db.Text, nullable=True)
+    expires_at    = db.Column(db.Date, nullable=True)
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at    = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    deleted_at    = db.Column(db.DateTime, nullable=True)  # soft delete
+
+    driver = db.relationship("Driver", backref=db.backref("documents", lazy="dynamic"))
+
+    def __repr__(self):
+        return f"<DriverDocument driver={self.driver_id} type={self.document_type}>"
+
+
+# =========================
 # Driver ID generation hook
 # =========================
 def _next_driver_id(connection) -> str:

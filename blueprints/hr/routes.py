@@ -216,7 +216,7 @@ def approve_driver(driver_id):
     max_bytes = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
 
     try:
-        process_hr_approval(driver, files, request.form, _upload_root(), max_bytes)
+        process_hr_approval(driver, files, request.form, _upload_root(), max_bytes, db=db, uploaded_by_id=current_user.id)
         _ensure_driver_password(driver)
         db.session.commit()
         current_app.logger.info(
@@ -371,7 +371,7 @@ def complete_sponsorship_transfer(driver_id):
             file = request.files.get("sponsorship_transfer_proof")
             try:
                 max_bytes = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
-                save_transfer_proof(driver, file, _upload_root(), transfer_status, max_bytes)
+                save_transfer_proof(driver, file, _upload_root(), transfer_status, max_bytes, db=db, uploaded_by_id=current_user.id)
                 driver.sponsorship_transfer_completed_at = completed_at
                 driver.mark_completed_onboarding(completed_at)
                 _ensure_driver_code(driver)

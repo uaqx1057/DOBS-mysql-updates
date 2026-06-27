@@ -32,6 +32,7 @@ from blueprints.fleet.routes import fleet_bp
 from blueprints.finance.routes import finance_bp
 from blueprints.reports.routes import reports_bp
 from blueprints.sso import sso_bp
+from blueprints.driver import driver_bp
 
 
 
@@ -219,6 +220,7 @@ def create_app():
     app.register_blueprint(finance_bp, url_prefix="/dashboard/finance")
     app.register_blueprint(reports_bp, url_prefix="/reports")
     app.register_blueprint(sso_bp)
+    app.register_blueprint(driver_bp)
 
     # --- Default language before request ---
     @app.before_request

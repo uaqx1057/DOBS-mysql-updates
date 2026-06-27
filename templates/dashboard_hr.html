@@ -316,11 +316,17 @@ function openHrFullModal(btn){
     const filename = d.iqama_card_upload.split('/').pop(); // just the filename
     html += `<div style="margin-top:8px;">
       <label>Iqama Card:</label><br>
-      <img src="/static/uploads/${encodeURIComponent(filename)}" 
-          alt="Iqama Card" 
+      <img src="/static/uploads/${encodeURIComponent(filename)}"
+          alt="Iqama Card"
           style="max-width:200px; border:1px solid #ccc; border-radius:6px;">
     </div>`;
   }
+  html += `<div style="margin-top:12px;">
+    <a href="/driver/${d.id}/documents" target="_blank"
+       style="display:inline-block;padding:7px 16px;background:#602273;color:#fff;border-radius:7px;font-weight:600;text-decoration:none;font-size:13px;">
+      📄 View All Documents
+    </a>
+  </div>`;
 
 
  

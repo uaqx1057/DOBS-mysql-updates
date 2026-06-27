@@ -1,5 +1,6 @@
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from werkzeug.utils import secure_filename
 
@@ -52,3 +53,19 @@ def validate_upload(file_storage, max_bytes: int, allowed_ext=ALLOWED_EXTENSIONS
     file_storage.stream.seek(0)
     if size > max_bytes:
         raise ValueError(f"File too large. Maximum {max_bytes // (1024 * 1024)} MB.")
+
+
+def save_to_shared_storage(file_storage, driver_id: int, document_type: str, shared_root: str) -> str:
+    """Save a file to the shared driver_documents storage and return the relative path.
+
+    Saves to: {shared_root}/{driver_id}/{timestamp}_{type}.{ext}
+    Returns:  {driver_id}/{filename}  (relative path stored in driver_documents.file_path)
+    """
+    ext = Path(file_storage.filename).suffix.lower()
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    filename = secure_filename(f"{timestamp}_{document_type}{ext}")
+    folder = Path(shared_root) / str(driver_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    file_storage.stream.seek(0)
+    file_storage.save(folder / filename)
+    return f"{driver_id}/{filename}"
