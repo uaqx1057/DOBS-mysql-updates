@@ -536,7 +536,7 @@ function openHrFullModal(btn){
         </script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
         <script>
-        const offboardingData = JSON.parse('{{ offboarding_drivers | tojson | default("[]") | safe }}');
+        const offboardingData = {{ offboarding_drivers | default([]) | tojson }};
 
       function validateHrForm() {
           const companyCancelled = document.getElementById("companyContractCancelled").checked;
