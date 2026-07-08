@@ -11,6 +11,7 @@ from sqlalchemy import or_
 from extensions import db, mail, limiter
 from models import Driver, User, Offboarding, DriverDocument
 from services.file_storage import save_to_shared_storage
+from services import onboarding_workflow
 from utils.email_utils import send_password_change_email, safe_send_email
 from flask_wtf.csrf import validate_csrf, CSRFError
 from forms.common import (
@@ -163,11 +164,8 @@ def dashboard_finance():
     total_drivers = len(pending_drivers)
     total_users = len(offboarding_requests)
 
-    # Choose template based on language
-    template = "rtl_dashboard_finance.html" if lang == "ar" else "dashboard_finance.html"
-
     return render_template(
-        template,
+        "dashboard_finance.html",
         pending_drivers=pending_drivers,
         completed_drivers=completed_drivers,
         offboarding_requests=offboarding_requests,
@@ -175,7 +173,6 @@ def dashboard_finance():
         total_drivers=total_drivers,
         total_users=total_users,
         user=current_user,
-        lang=lang,
         q=q,
     )
 
@@ -271,7 +268,7 @@ def approve_driver(driver_id):
     driver.transfer_fee_paid = True
     driver.transfer_fee_paid_at = datetime.utcnow()
     driver.finance_approved_at = datetime.utcnow()
-    driver.onboarding_stage = "HR Final"
+    onboarding_workflow.advance(driver, from_stage="Finance")
 
     try:
         db.session.commit()

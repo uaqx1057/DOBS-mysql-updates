@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tr('Roles & Permissions', 'الأدوار والصلاحيات') }} — DOBS{% endblock %}
+{% block navbar_title %}{{ tr('Roles & Permissions', 'الأدوار والصلاحيات') }}{% endblock %}
+{% block navbar_actions %}
+<a href="{{ url_for('admin.dashboard') }}" class="nav-btn">&larr; {{ tr('Back to Dashboard', 'العودة للوحة التحكم') }}</a>
+{% endblock %}
+
+{% block content %}
+<div class="page-header reveal">
+  <h1 class="page-title">{{ tr('Roles', 'الأدوار') }}</h1>
+  <p class="page-subtitle">{{ tr('Create a role, then open it to choose exactly which actions it can perform. Built-in roles cannot be renamed or deleted since other parts of the app still match them by name.', 'أنشئ دوراً ثم افتحه لاختيار الإجراءات التي يمكنه تنفيذها. لا يمكن إعادة تسمية أو حذف الأدوار المدمجة.') }}</p>
+</div>
+
+<div class="card reveal mb-4">
+  <div class="table-responsive">
+    <table class="table table-sm">
+      <thead>
+        <tr>
+          <th>{{ tr('Role', 'الدور') }}</th>
+          <th>{{ tr('Description', 'الوصف') }}</th>
+          <th>{{ tr('Users', 'المستخدمون') }}</th>
+          <th>{{ tr('Type', 'النوع') }}</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for role in roles %}
+        <tr>
+          <td><strong>{{ role.name }}</strong></td>
+          <td class="text-secondary small">{{ role.description or '—' }}</td>
+          <td>{{ user_counts.get(role.id, 0) }}</td>
+          <td>
+            {% if role.name in legacy_role_names %}
+            <span class="badge-soft neutral">{{ tr('Built-in', 'مدمج') }}</span>
+            {% else %}
+            <span class="badge-soft info">{{ tr('Custom', 'مخصص') }}</span>
+            {% endif %}
+          </td>
+          <td class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.role_permissions', role_id=role.id) }}">{{ tr('Permissions', 'الصلاحيات') }}</a>
+            {% if role.name not in legacy_role_names %}
+            <form method="post" action="{{ url_for('admin.delete_role', role_id=role.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('{{ tr('Delete this role?', 'حذف هذا الدور؟') }}')">{{ tr('Delete', 'حذف') }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h4 class="fs-6 fw-semibold text-secondary text-uppercase">{{ tr('Create a Role', 'إنشاء دور') }}</h4>
+  <form class="row g-2 align-items-end" method="post" action="{{ url_for('admin.add_role') }}">
+    {{ role_form.hidden_tag() }}
+    <div class="col-auto">
+      <label class="form-label">{{ tr('Name', 'الاسم') }}</label>
+      {{ role_form.name(class_="form-control", placeholder=tr('e.g. Regional Auditor', 'مثال: مدقق إقليمي')) }}
+    </div>
+    <div class="col-auto" style="min-width:280px;">
+      <label class="form-label">{{ tr('Description', 'الوصف') }}</label>
+      {{ role_form.description(class_="form-control", placeholder=tr('What this role is for', 'الغرض من هذا الدور')) }}
+    </div>
+    <div class="col-auto"><button class="btn btn-primary" type="submit">{{ tr('Create Role', 'إنشاء دور') }}</button></div>
+  </form>
+</div>
+{% endblock %}

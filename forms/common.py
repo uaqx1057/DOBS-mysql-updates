@@ -1,7 +1,14 @@
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileAllowed, FileField, FileRequired
-from wtforms import BooleanField, DateField, IntegerField, PasswordField, SelectField, StringField
+from wtforms import BooleanField, DateField, IntegerField, PasswordField, SelectField, StringField, TextAreaField
 from wtforms.validators import Optional, DataRequired, Email, Length, EqualTo
+
+from models import ONBOARDING_STAGES
+
+
+class RoleForm(FlaskForm):
+    name = StringField("Role Name", validators=[DataRequired(), Length(max=50)])
+    description = StringField("Description", validators=[Optional(), Length(max=255)])
 
 
 class CSRFOnlyForm(FlaskForm):
@@ -121,10 +128,25 @@ class PublicRegisterForm(FlaskForm):
         "Iqama Card",
         validators=[FileRequired(message="Iqama card upload is required."), FileAllowed(["png", "jpg", "jpeg", "pdf"], "Images or PDF only")],
     )
+    driving_license_upload = FileField(
+        "Driving License",
+        validators=[FileRequired(message="Driving license upload is required."), FileAllowed(["png", "jpg", "jpeg", "pdf"], "Images or PDF only")],
+    )
+    passport_upload = FileField(
+        "Passport",
+        validators=[FileRequired(message="Passport upload is required."), FileAllowed(["png", "jpg", "jpeg", "pdf"], "Images or PDF only")],
+    )
 
 
 class OpsManagerApproveForm(CSRFOnlyForm):
     ops_note = StringField("Ops Note", validators=[Optional(), Length(max=500)])
+    driver_type_id = IntegerField("Driver Type", validators=[DataRequired()])
+    will_provide_vehicle = SelectField(
+        "Company Vehicle",
+        choices=[("false", "No — driver arranges their own"), ("true", "Yes — company will provide a vehicle")],
+        validators=[Optional()],
+        default="false",
+    )
 
 
 class OpsManagerRejectForm(CSRFOnlyForm):
@@ -172,3 +194,35 @@ class FinanceApproveForm(FlaskForm):
 class FinanceOffboardingClearForm(FlaskForm):
     finance_adjustments = StringField("Finance Adjustments", validators=[Optional(), Length(max=50)])
     finance_note = StringField("Finance Note", validators=[Optional(), Length(max=500)])
+
+
+# -------------------------
+# Admin config: onboarding workflow builder + contract templates
+# -------------------------
+class OnboardingStageTemplateForm(FlaskForm):
+    driver_type_id = IntegerField("Driver Type ID", validators=[DataRequired()])
+    sequence_order = IntegerField("Order", validators=[DataRequired()])
+    stage_name = SelectField(
+        "Stage",
+        choices=[(s, s) for s in ONBOARDING_STAGES if s != "Rejected"],
+        validators=[DataRequired()],
+    )
+    skip_condition_field = StringField("Skip Condition Field", validators=[Optional(), Length(max=100)])
+    skip_condition_value = StringField("Skip Condition Value", validators=[Optional(), Length(max=50)])
+
+
+class DriverTypeSettingsForm(FlaskForm):
+    driver_type_id = IntegerField("Driver Type ID", validators=[DataRequired()])
+    contract_mode = SelectField(
+        "Contract Mode",
+        choices=[("single", "Single fixed contract"), ("per_business", "One per assigned business")],
+        validators=[DataRequired()],
+    )
+
+
+class ContractTemplateForm(FlaskForm):
+    name = StringField("Template Name", validators=[DataRequired(), Length(max=150)])
+    business_id = IntegerField("Business ID (blank = generic)", validators=[Optional()])
+    driver_type_id = IntegerField("Driver Type ID (blank = any)", validators=[Optional()])
+    body_content = TextAreaField("Contract Body", validators=[DataRequired()])
+    is_active = BooleanField("Active", default=True)

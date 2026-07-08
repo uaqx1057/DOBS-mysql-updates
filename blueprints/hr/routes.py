@@ -114,6 +114,18 @@ def _ensure_driver_password(driver: Driver):
 def _set_default_driver_password(driver: Driver):
     driver.password = generate_password_hash(DEFAULT_DRIVER_PASSWORD)
 
+
+def _generate_driver_contracts_safe(driver: Driver, uploaded_by_id=None):
+    """Business-specific Driver Contract(s), generated at HR Final now that
+    Ops Supervisor has already assigned platform IDs. Logged, not raised, so
+    a template/rendering issue never blocks completing onboarding."""
+    try:
+        from services import contracts
+        contracts.generate_driver_contracts(driver, uploaded_by_id=uploaded_by_id)
+    except Exception:
+        current_app.logger.exception("Driver contract generation failed for driver_id=%s", driver.id)
+
+
 def _serialize_offboarding(o):
     return {
         "offboarding_id": o.id,
@@ -187,11 +199,8 @@ def dashboard_hr():
     offboardings = offboardings_query.all()
     offboarding_data = [_serialize_offboarding(o) for o in offboardings]
 
-    from flask import session
-    lang = session.get("lang", "en")
-    template = "rtl_dashboard_hr.html" if lang == "ar" else "dashboard_hr.html"
     return render_template(
-        template,
+        "dashboard_hr.html",
         drivers=drivers_data,
         offboarding_drivers=offboarding_data,
         total_drivers=total_drivers,
@@ -362,6 +371,7 @@ def complete_sponsorship_transfer(driver_id):
             driver.sponsorship_transfer_status = "Not Required"
             driver.sponsorship_transfer_proof = None
             driver.sponsorship_transfer_completed_at = completed_at
+            _generate_driver_contracts_safe(driver, uploaded_by_id=current_user.id)
             db.session.commit()
 
             flash(f"✅ Driver {driver.name} marked as completed (no Qiwa contract).", "success")
@@ -376,6 +386,7 @@ def complete_sponsorship_transfer(driver_id):
                 driver.mark_completed_onboarding(completed_at)
                 _ensure_driver_code(driver)
                 _set_default_driver_password(driver)
+                _generate_driver_contracts_safe(driver, uploaded_by_id=current_user.id)
                 db.session.commit()
                 current_app.logger.info(
                     "hr_complete_transfer",
@@ -483,11 +494,12 @@ def complete_driver(driver_id):
     if not driver.qiwa_contract_created:
         completed_at = datetime.utcnow()
         driver.mark_completed_onboarding(completed_at)
-        _ensure_driver_code(driver) 
+        _ensure_driver_code(driver)
         _set_default_driver_password(driver)
         driver.sponsorship_transfer_status = "Not Required"
         driver.sponsorship_transfer_proof = None
         driver.sponsorship_transfer_completed_at = completed_at
+        _generate_driver_contracts_safe(driver, uploaded_by_id=current_user.id)
         db.session.commit()
         flash(f"✅ Driver {driver.name} marked as completed (no Qiwa contract).", "success")
     else:
@@ -546,23 +558,12 @@ def start_offboarding(driver_id):
 
 # -------------------------
 # Complete Offboarding
+#
+# The old /complete_offboarding/<id> route called a mark_hr_cleared() method
+# that never existed on the Offboarding model (a live AttributeError bug)
+# and wasn't referenced by any template. finalize_offboarding below is the
+# real, working HR-clear endpoint - it's the only one that's ever been used.
 # -------------------------
-
-@hr_bp.route("/complete_offboarding/<int:offboarding_id>", methods=["POST"])
-@login_required
-def complete_offboarding(offboarding_id):
-    if current_user.role != "HR":
-        flash("Access denied", "danger")
-        return redirect(url_for("auth.login"))
-
-    offboarding = Offboarding.query.get_or_404(offboarding_id)
-    note = request.form.get("hr_note")
-    offboarding.mark_hr_cleared(note=note)
-
-    db.session.commit()
-    flash(f"HR clearance completed for {offboarding.driver.name}.", "success")
-    return redirect(url_for("hr.dashboard_hr"))
-
 
 @hr_bp.route("/offboarding/finalize", methods=["POST"])
 @login_required
@@ -606,6 +607,12 @@ def finalize_offboarding():
     offboarding.hr_cleared = True
     offboarding.hr_cleared_at = datetime.utcnow()
     offboarding.status = "Completed"
+
+    try:
+        from services import contracts
+        contracts.generate_final_settlement(offboarding, uploaded_by_id=current_user.id)
+    except Exception:
+        current_app.logger.exception("Final settlement generation failed for offboarding_id=%s", offboarding.id)
 
     db.session.commit()
 

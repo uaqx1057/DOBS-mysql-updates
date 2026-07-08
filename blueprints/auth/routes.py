@@ -11,12 +11,47 @@ from forms.auth import LoginForm
 from models import User, ResetToken  # dob_user model
 from extensions import db, login_manager, limiter
 from flask_mail import Message
+from services.rbac import user_role_names
 
 auth_bp = Blueprint("auth", __name__)
 
 
 def _role_key(role_raw: str) -> str:
     return "".join(ch for ch in (role_raw or "").lower() if ch.isalnum())
+
+
+ROLE_DASHBOARD_ENDPOINTS = {
+    "superadmin": "admin.dashboard",
+    "hr": "hr.dashboard_hr",
+    "opscoordinator": "ops_coordinator.dashboard_ops_coordinator",
+    "opsmanager": "ops_manager.dashboard_ops",
+    "opssupervisor": "ops_supervisor.dashboard_ops_supervisor",
+    "fleetmanager": "fleet.dashboard_fleet",
+    "financemanager": "finance.dashboard_finance",
+}
+
+
+def _post_login_redirect(user):
+    """Multi-role users (granted extra roles via the admin Access page) land
+    on a role picker; single-role users go straight to their dashboard,
+    exactly as before."""
+    role_names = user_role_names(user)
+    if len(role_names) > 1:
+        return redirect(url_for("auth.choose_role"))
+
+    role_key = _role_key(user.role)
+    target = ROLE_DASHBOARD_ENDPOINTS.get(role_key)
+    if not target:
+        current_app.logger.warning(
+            "login_role_unmapped", extra={"user": user.username, "role": user.role}
+        )
+        flash("Role is not configured for redirect.", "warning")
+        return redirect(url_for("auth.login"))
+
+    current_app.logger.info(
+        "login_redirect", extra={"user": user.username, "role": user.role, "target": target}
+    )
+    return redirect(url_for(target))
 
 
 # Load user callback
@@ -71,31 +106,20 @@ def login():
             "login_success", extra={"username": user.username, "ip": request.remote_addr, "path": request.path}
         )
 
-        role_key = _role_key(user.role)
-        role_redirects = {
-            "superadmin": "admin.dashboard",
-            "hr": "hr.dashboard_hr",
-            "opscoordinator": "ops_coordinator.dashboard_ops_coordinator",
-            "opsmanager": "ops_manager.dashboard_ops",
-            "opssupervisor": "ops_supervisor.dashboard_ops_supervisor",
-            "fleetmanager": "fleet.dashboard_fleet",
-            "financemanager": "finance.dashboard_finance",
-        }
-
-        target = role_redirects.get(role_key)
-        if not target:
-            current_app.logger.warning(
-                "login_role_unmapped", extra={"user": user.username, "role": user.role}
-            )
-            flash("Role is not configured for redirect.", "warning")
-            return render_template("login.html", form=form)
-
-        current_app.logger.info(
-            "login_redirect", extra={"user": user.username, "role": user.role, "target": target}
-        )
-        return redirect(url_for(target))
+        return _post_login_redirect(user)
 
     return render_template("login.html", form=form)
+
+
+@auth_bp.route("/choose-role", methods=["GET"])
+@login_required
+def choose_role():
+    role_names = sorted(user_role_names(current_user))
+    roles = [
+        {"name": name, "endpoint": ROLE_DASHBOARD_ENDPOINTS.get(_role_key(name))}
+        for name in role_names
+    ]
+    return render_template("choose_role.html", roles=roles)
 
 @auth_bp.route("/logout")
 @login_required
@@ -140,30 +164,8 @@ def verify_otp():
     for key in ["otp_pending", "otp_user_id", "otp_code", "otp_expires_at"]:
         session.pop(key, None)
 
-    role_key = _role_key(user.role)
-    role_redirects = {
-        "superadmin": "admin.dashboard",
-        "hr": "hr.dashboard_hr",
-        "opscoordinator": "ops_coordinator.dashboard_ops_coordinator",
-        "opsmanager": "ops_manager.dashboard_ops",
-        "opssupervisor": "ops_supervisor.dashboard_ops_supervisor",
-        "fleetmanager": "fleet.dashboard_fleet",
-        "financemanager": "finance.dashboard_finance",
-    }
-
-    target = role_redirects.get(role_key)
-    if not target:
-        current_app.logger.warning(
-            "login_role_unmapped_otp", extra={"user": user.username, "role": user.role}
-        )
-        flash("Role is not configured for redirect.", "warning")
-        return render_template("login.html")
-
-    current_app.logger.info(
-        "login_redirect_otp", extra={"user": user.username, "role": user.role, "target": target}
-    )
     flash("Login successful!", "success")
-    return redirect(url_for(target))
+    return _post_login_redirect(user)
 
 
 def _json_or_html(payload, status=200):

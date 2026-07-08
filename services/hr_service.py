@@ -6,6 +6,7 @@ from flask import current_app
 from flask_mail import Message
 
 from services.file_storage import is_allowed_file, save_upload, safe_ext_filename, validate_upload, save_to_shared_storage
+from services import onboarding_workflow
 from models import QIWA_CONTRACT_STATUSES, TRANSFER_STATUSES
 
 # Maps Driver column names used in HR approval -> shared document_type
@@ -71,7 +72,19 @@ def process_hr_approval(driver, files: Dict[str, object], form_data: Dict[str, o
     driver.sponsorship_transfer_status = transfer_status
 
     driver.hr_approved_at = datetime.utcnow()
-    driver.onboarding_stage = "Ops Supervisor"
+    onboarding_workflow.advance(driver, from_stage="HR")
+
+    # Generic promissory note - not business-specific, so it can be
+    # generated now even though platform/business assignment hasn't
+    # happened yet (that's Ops Supervisor's job, still ahead in the
+    # sequence). The business-specific Driver Contract is generated later,
+    # at HR Final, once the business assignment is known.
+    if db is not None and driver.id:
+        try:
+            from services import contracts
+            contracts.generate_promissory_note(driver, uploaded_by_id=uploaded_by_id)
+        except Exception:
+            current_app.logger.exception("Promissory note generation failed for driver_id=%s", driver.id)
 
 
 def save_transfer_proof(driver, file_storage, upload_folder: str, status: str, max_bytes: int, db=None, uploaded_by_id=None):

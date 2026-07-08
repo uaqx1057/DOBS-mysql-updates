@@ -46,6 +46,38 @@ OFFBOARDING_STATUSES = (
 )
 
 # =========================
+# External reference models
+#
+# `branches` and `driver_types` are owned/migrated by the DMS (Laravel) side
+# of the shared database. DOBS never creates, alters, or writes to these
+# tables — it only reads them, so only the columns DOBS actually needs are
+# mapped here.
+# =========================
+class Branch(db.Model):
+    __tablename__ = "branches"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<Branch {self.name}>"
+
+
+class DriverType(db.Model):
+    __tablename__ = "driver_types"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    is_freelancer = db.Column(db.Boolean, default=False)
+    fields = db.Column(db.Text, nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<DriverType {self.name}>"
+
+
+# =========================
 # User Model
 # =========================
 class User(db.Model, UserMixin):
@@ -129,6 +161,8 @@ class Driver(db.Model):
     absher_number = db.Column(db.String(15), nullable=True)
     previous_sponsor_number = db.Column(db.String(50), nullable=True)
     iqama_card_upload = db.Column(db.String(200), nullable=True)
+    driving_license_upload = db.Column(db.String(200), nullable=True)
+    passport_upload = db.Column(db.String(200), nullable=True)
     platform = db.Column(db.String(100), nullable=True)
     city = db.Column(db.String(100), nullable=True)
     car_details = db.Column(db.String(200), nullable=True)
@@ -146,6 +180,10 @@ class Driver(db.Model):
     fleet_manager_approved_at = db.Column(db.DateTime, nullable=True)
     finance_approved_at = db.Column(db.DateTime, nullable=True)
     ops_manager_approved = db.Column(db.Boolean, default=False)
+    # Set by Ops Manager alongside driver_type_id - determines whether the
+    # Fleet Manager stage is included for Freelancer/Manpower drivers (see
+    # dobs_onboarding_stage_template's skip_condition_field).
+    will_provide_vehicle = db.Column(db.Boolean, nullable=True)
     hr_approved_by = db.Column(db.Integer, db.ForeignKey("dobs_user.id"), nullable=True)
     hr_approved_by_user = db.relationship("User", back_populates="hr_approved_drivers", foreign_keys=[hr_approved_by])
     platform_id = db.Column(db.String(50), nullable=True)
@@ -159,7 +197,11 @@ class Driver(db.Model):
     issued_device_id = db.Column(db.String(100), nullable=True)
     tamm_authorization_ss = db.Column(db.String(200), nullable=True)
     sponsorship_transfer_proof = db.Column(db.String(200), nullable=True)
-    driver_type_id = db.Column(db.Integer, nullable=False, default=1)
+    driver_type_id = db.Column(db.Integer, db.ForeignKey("driver_types.id"), nullable=False, default=1)
+    branch_id = db.Column(db.BigInteger, db.ForeignKey("branches.id"), nullable=True)
+
+    driver_type = db.relationship("DriverType")
+    branch = db.relationship("Branch")
 
     # HR Files
     company_contract_file = db.Column(db.String(200), nullable=True)
@@ -195,28 +237,14 @@ class Driver(db.Model):
 
     # =========================
     # Helper methods for approval stages
+    #
+    # Actual stage transitions live in services/onboarding_workflow.py
+    # (config-driven per driver_type). This method only records the Fleet
+    # Manager approval timestamp - the caller advances the stage itself via
+    # onboarding_workflow.advance().
     # =========================
-    def mark_ops_manager_approved(self):
-        self.ops_manager_approved = True
-        self.ops_manager_approved_at = datetime.utcnow()
-        self.onboarding_stage = "HR"
-
-    def mark_hr_approved(self, user_id):
-        self.hr_approved_at = datetime.utcnow()
-        self.hr_approved_by = user_id
-        self.onboarding_stage = "Ops Supervisor"
-
-    def mark_ops_supervisor_approved(self):
-        self.ops_supervisor_approved_at = datetime.utcnow()
-        self.onboarding_stage = "Fleet Manager"
-
     def mark_fleet_manager_approved(self):
         self.fleet_manager_approved_at = datetime.utcnow()
-        self.onboarding_stage = "Finance"
-
-    def mark_finance_approved(self):
-        self.finance_approved_at = datetime.utcnow()
-        self.onboarding_stage = "Completed"
 
     def ensure_shared_driver_defaults(self, created_at: datetime | None = None):
         self._sync_shared_driver_fields(created_at=created_at or datetime.utcnow())
@@ -360,11 +388,17 @@ class Offboarding(db.Model):
     driver_id = db.Column(db.Integer, db.ForeignKey("drivers.id"), nullable=False)
     requested_by_id = db.Column(db.Integer, db.ForeignKey("dobs_user.id"), nullable=False)
     requested_at = db.Column(db.DateTime, default=datetime.utcnow)
+    request_reason = db.Column(db.Text)
     status = db.Column(db.String(30), default="Requested")
+    ops_manager_approved_at = db.Column(db.DateTime)
 
     ops_supervisor_cleared = db.Column(db.Boolean, default=False)
     ops_supervisor_cleared_at = db.Column(db.DateTime)
     ops_supervisor_note = db.Column(db.Text)
+    # Penalties/fines recorded when Ops Supervisor reclaims the platform ID,
+    # distinct from Fleet's damage cost and Finance's adjustments.
+    ops_supervisor_penalty_amount = db.Column(db.Numeric(12, 2))
+    ops_supervisor_penalty_note = db.Column(db.Text)
 
     fleet_cleared = db.Column(db.Boolean, default=False)
     fleet_cleared_at = db.Column(db.DateTime)
@@ -531,3 +565,124 @@ class AssignDriverReport(db.Model):
 
     def __repr__(self):
         return f"<AssignDriverReport vehicle={self.vehicle_id} driver={self.driver_id} status={self.status}>"
+
+
+# =========================
+# RBAC Models
+#
+# Additive alongside the legacy `User.role` string column. Multi-role support
+# comes from UserRole; a permission is granted to a user if EITHER one of
+# their roles grants it (RolePermission) OR they have an explicit
+# UserPermission override with granted=True (and not revoked via
+# granted=False, which takes precedence over role-derived grants).
+# =========================
+class Role(db.Model):
+    __tablename__ = "dobs_role"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+    description = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<Role {self.name}>"
+
+
+class Permission(db.Model):
+    __tablename__ = "dobs_permission"
+
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(100), unique=True, nullable=False)
+    description = db.Column(db.String(255), nullable=True)
+
+    def __repr__(self):
+        return f"<Permission {self.code}>"
+
+
+class RolePermission(db.Model):
+    __tablename__ = "dobs_role_permission"
+
+    role_id = db.Column(db.Integer, db.ForeignKey("dobs_role.id"), primary_key=True)
+    permission_id = db.Column(db.Integer, db.ForeignKey("dobs_permission.id"), primary_key=True)
+
+    role = db.relationship("Role", backref="role_permissions")
+    permission = db.relationship("Permission")
+
+
+class UserRole(db.Model):
+    __tablename__ = "dobs_user_role"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("dobs_user.id"), primary_key=True)
+    role_id = db.Column(db.Integer, db.ForeignKey("dobs_role.id"), primary_key=True)
+
+    user = db.relationship("User", backref="user_roles")
+    role = db.relationship("Role")
+
+
+class UserPermission(db.Model):
+    __tablename__ = "dobs_user_permission"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("dobs_user.id"), primary_key=True)
+    permission_id = db.Column(db.Integer, db.ForeignKey("dobs_permission.id"), primary_key=True)
+    granted = db.Column(db.Boolean, default=True, nullable=False)
+
+    user = db.relationship("User", backref="user_permissions")
+    permission = db.relationship("Permission")
+
+
+# =========================
+# Onboarding workflow / contract configuration
+#
+# Admin-editable data replacing what would otherwise be hardcoded per-type
+# Python logic. New driver types, new stage sequences, and new
+# platform/business contracts are rows here, not code changes.
+# =========================
+class OnboardingStageTemplate(db.Model):
+    __tablename__ = "dobs_onboarding_stage_template"
+    __table_args__ = (
+        db.UniqueConstraint("driver_type_id", "sequence_order", name="ux_stage_template_type_order"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    driver_type_id = db.Column(db.Integer, db.ForeignKey("driver_types.id"), nullable=False)
+    sequence_order = db.Column(db.Integer, nullable=False)
+    stage_name = db.Column(db.String(50), nullable=False)  # must be one of ONBOARDING_STAGES
+    skip_condition_field = db.Column(db.String(100), nullable=True)  # e.g. "will_provide_vehicle"
+    skip_condition_value = db.Column(db.String(50), nullable=True)  # stage is skipped when driver's field == this
+
+    driver_type = db.relationship("DriverType")
+
+    def __repr__(self):
+        return f"<OnboardingStageTemplate type={self.driver_type_id} #{self.sequence_order} {self.stage_name}>"
+
+
+class DriverTypeSettings(db.Model):
+    __tablename__ = "dobs_driver_type_settings"
+
+    driver_type_id = db.Column(db.Integer, db.ForeignKey("driver_types.id"), primary_key=True)
+    contract_mode = db.Column(db.String(20), nullable=False, default="single")  # "single" | "per_business"
+
+    driver_type = db.relationship("DriverType")
+
+    def __repr__(self):
+        return f"<DriverTypeSettings type={self.driver_type_id} mode={self.contract_mode}>"
+
+
+class ContractTemplate(db.Model):
+    __tablename__ = "dobs_contract_template"
+
+    id = db.Column(db.Integer, primary_key=True)
+    business_id = db.Column(db.BigInteger, db.ForeignKey("businesses.id"), nullable=True)  # null = generic
+    driver_type_id = db.Column(db.Integer, db.ForeignKey("driver_types.id"), nullable=True)  # null = any type
+    name = db.Column(db.String(150), nullable=False)
+    body_content = db.Column(db.Text, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    version = db.Column(db.String(20), default="1.0")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    business = db.relationship("Business")
+    driver_type = db.relationship("DriverType")
+
+    def __repr__(self):
+        return f"<ContractTemplate {self.name} business={self.business_id} type={self.driver_type_id}>"

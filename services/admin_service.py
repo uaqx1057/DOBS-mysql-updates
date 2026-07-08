@@ -85,6 +85,11 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
                 setattr(driver, field, float(value) if value not in (None, "") else None)
             except (TypeError, ValueError):
                 setattr(driver, field, None)
+        elif field == "branch_id":
+            try:
+                setattr(driver, field, int(value) if value not in (None, "") else driver.branch_id)
+            except (TypeError, ValueError):
+                pass
         else:
             setattr(driver, field, value)
 

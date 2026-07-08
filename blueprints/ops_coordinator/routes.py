@@ -7,6 +7,8 @@ from flask_mail import Message
 from werkzeug.security import check_password_hash, generate_password_hash
 from utils.email_utils import send_password_change_email
 from forms.common import ChangePasswordForm, OpsCoordinatorOffboardingForm
+from services import offboarding_workflow
+from services.rbac import require_permission
 
 
 ops_coordinator_bp = Blueprint("ops_coordinator", __name__)
@@ -35,7 +37,6 @@ def dashboard_ops_coordinator():
         flash("Access denied. Ops Coordinator role required.", "danger")
         return redirect(url_for("auth.login"))
 
-    lang = session.get("lang", "en")
     q = (request.args.get("q") or "").strip()
 
     completed_drivers_query = (
@@ -53,10 +54,8 @@ def dashboard_ops_coordinator():
         )
     completed_drivers = completed_drivers_query.all()
 
-    template = "rtl_dashboard_ops_coordinator.html" if lang == "ar" else "dashboard_ops_coordinator.html"
-
     return render_template(
-        template,
+        "dashboard_ops_coordinator.html",
         completed_drivers=completed_drivers,
         count_completed=len(completed_drivers),
         q=q,
@@ -69,11 +68,8 @@ def dashboard_ops_coordinator():
 @ops_coordinator_bp.route("/initiate_offboarding/<int:driver_id>", methods=["POST"])
 @limiter.limit("20 per minute")
 @login_required
+@require_permission("offboarding.request")
 def initiate_offboarding(driver_id):
-    if not _is_ops_coordinator(current_user):
-        flash("Access denied. Ops Coordinator role required.", "danger")
-        return redirect(url_for("auth.login"))
-
     form = OpsCoordinatorOffboardingForm()
     if not form.validate_on_submit():
         flash("Invalid or missing CSRF token. Please try again.", "danger")
@@ -85,19 +81,22 @@ def initiate_offboarding(driver_id):
         flash("Only completed drivers can be requested for offboarding.", "warning")
         return redirect(url_for("ops_coordinator.dashboard_ops_coordinator"))
 
-    if driver.offboard_request:
+    existing = offboarding_workflow.get_open_offboarding(driver)
+    if existing:
         flash(f"Offboarding already requested for {driver.name}.", "info")
         return redirect(url_for("ops_coordinator.dashboard_ops_coordinator"))
 
     reason = (form.reason.data or "").strip()
 
+    # Legacy display flags kept in sync for any dashboard still reading them
+    # directly off Driver; the real workflow state now lives on Offboarding.
     driver.offboard_request = True
     driver.offboard_requested_by = current_user.name or current_user.username
     driver.offboard_reason = reason or "No reason provided"
     driver.offboard_requested_at = datetime.utcnow()
 
     try:
-        db.session.commit()
+        offboarding_workflow.request_offboarding(driver, current_user, reason=reason)
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Failed to save offboarding request.")

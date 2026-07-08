@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tr('Access', 'الصلاحيات') }} — {{ user.username }} — DOBS{% endblock %}
+{% block navbar_title %}{{ tr('Access', 'الصلاحيات') }} — {{ user.name or user.username }}{% endblock %}
+{% block navbar_actions %}
+<a href="{{ url_for('admin.dashboard') }}" class="nav-btn">&larr; {{ tr('Back to Dashboard', 'العودة للوحة التحكم') }}</a>
+{% endblock %}
+
+{% block content %}
+<div class="card reveal mb-4" style="max-width:800px;">
+  <h2 class="fs-5 fw-semibold mb-2" style="color:var(--primary);">{{ tr('Roles', 'الأدوار') }}</h2>
+  <p class="text-secondary small mb-3">
+    {{ tr('Legacy primary role:', 'الدور الأساسي القديم:') }} <span class="badge-soft neutral">{{ user.role }}</span>
+    {{ tr('(kept for backward compatibility — this page grants additional roles on top of it). If this user holds more than one role, they will see a role picker after login.', '(محفوظ للتوافق مع النظام القديم — تمنح هذه الصفحة أدواراً إضافية فوقه. إذا كان لدى هذا المستخدم أكثر من دور، سيظهر له مُنتقي الأدوار بعد تسجيل الدخول.') }}
+  </p>
+  <form method="post" action="{{ url_for('admin.save_user_roles', user_id=user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% for role in all_roles %}
+    <label class="d-flex align-items-center gap-2 py-2 border-bottom">
+      <input type="checkbox" class="form-check-input" name="role_ids" value="{{ role.id }}" {{ 'checked' if role.id in granted_role_ids else '' }}>
+      {{ role.name }}
+    </label>
+    {% endfor %}
+    <button class="btn btn-primary mt-3" type="submit">{{ tr('Save Roles', 'حفظ الأدوار') }}</button>
+  </form>
+</div>
+
+<div class="card reveal" style="max-width:800px;">
+  <h2 class="fs-5 fw-semibold mb-2" style="color:var(--primary);">{{ tr('Permission Overrides', 'تجاوزات الصلاحيات') }}</h2>
+  <p class="text-secondary small mb-3">{{ tr('"Inherit" means access follows whatever the user\'s roles normally grant. "Grant" or "Revoke" always wins over role-derived access — this is how you give one specific employee the ability to request an offboarding without changing their role.', '"وراثة" تعني أن الوصول يتبع ما تمنحه أدوار المستخدم عادة. "منح" أو "سحب" يتغلب دائماً على الوصول المستمد من الدور.') }}</p>
+  <form method="post" action="{{ url_for('admin.save_user_permissions', user_id=user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% set ns = namespace(category='') %}
+    {% for perm in all_permissions %}
+    {% set current = overrides.get(perm.id) %}
+    {% set category = perm.code.split('.')[0] %}
+    {% if category != ns.category %}
+      {% if not loop.first %}</div>{% endif %}
+      <h4 class="fs-6 fw-semibold text-secondary text-uppercase mt-3">{{ category | capitalize }}</h4>
+      <div>
+      {% set ns.category = category %}
+    {% endif %}
+    <div class="d-flex justify-content-between align-items-center py-2 border-bottom flex-wrap gap-2">
+      <div>{{ perm.code }}{% if perm.description %}<br><span class="text-secondary small">{{ perm.description }}</span>{% endif %}</div>
+      <div class="d-flex gap-3">
+        <label class="d-flex align-items-center gap-1 small"><input type="radio" name="perm_{{ perm.id }}" value="inherit" {{ 'checked' if current is none else '' }}> {{ tr('Inherit', 'وراثة') }}</label>
+        <label class="d-flex align-items-center gap-1 small"><input type="radio" name="perm_{{ perm.id }}" value="grant" {{ 'checked' if current == True else '' }}> {{ tr('Grant', 'منح') }}</label>
+        <label class="d-flex align-items-center gap-1 small"><input type="radio" name="perm_{{ perm.id }}" value="revoke" {{ 'checked' if current == False else '' }}> {{ tr('Revoke', 'سحب') }}</label>
+      </div>
+    </div>
+    {% if loop.last %}</div>{% endif %}
+    {% endfor %}
+    <button class="btn btn-primary mt-3" type="submit">{{ tr('Save Permission Overrides', 'حفظ تجاوزات الصلاحيات') }}</button>
+  </form>
+</div>
+{% endblock %}

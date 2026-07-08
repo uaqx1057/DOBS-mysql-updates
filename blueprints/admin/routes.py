@@ -1,11 +1,14 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session , current_app, jsonify
 from flask_login import login_required, current_user
-from models import Business, DriverBusinessIDS, Offboarding, db, Driver, User, BusinessID, BusinessDriver
+from models import (
+    Business, DriverBusinessIDS, Offboarding, db, Driver, User, BusinessID, BusinessDriver,
+    DriverType, OnboardingStageTemplate, DriverTypeSettings, ContractTemplate, Branch,
+)
 from extensions import db, mail, limiter
 from flask_mail import Message
 from datetime import datetime
 import os
-from utils.email_utils import send_password_change_email 
+from utils.email_utils import send_password_change_email
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 from services.admin_service import (
@@ -16,11 +19,19 @@ from services.admin_service import (
     delete_user as delete_user_service,
     change_user_password,
 )
-from forms.common import CSRFOnlyForm, AddUserForm, AddDriverForm, ChangePasswordForm, EditUserForm
+from forms.common import (
+    CSRFOnlyForm, AddUserForm, AddDriverForm, ChangePasswordForm, EditUserForm,
+    OnboardingStageTemplateForm, DriverTypeSettingsForm, ContractTemplateForm, RoleForm,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_
 from utils.auth import require_roles_or_owner
 from utils.cache import ttl_cache
+from models import Role, Permission, UserRole, UserPermission
+from services.rbac import (
+    grant_role, revoke_role, set_permission_override, clear_permission_override,
+    role_permission_codes, set_role_permissions,
+)
 from . import admin_bp
 
 UPLOAD_FOLDER = "static/uploads"
@@ -169,6 +180,7 @@ def dashboard():
         data = {
             "id": d.id,
             "name": d.name,
+            "branch_id": d.branch_id,
             "iqaama_number": d.iqaama_number,
             "iqaama_expiry": d.iqaama_expiry.isoformat() if d.iqaama_expiry else None,
             "nationality": d.nationality,
@@ -299,18 +311,10 @@ def dashboard():
         })
 
     # -------------------------
-    # Language / RTL
-    # -------------------------
-    lang = request.args.get("lang") or session.get("lang") or "en"
-    session["lang"] = lang
-    rtl = True if lang == "ar" else False
-    template = "rtl_dashboard.html" if rtl else "dashboard.html"
-
-    # -------------------------
     # Render template
     # -------------------------
     return render_template(
-        template,
+        "dashboard.html",
         users=users_dicts,
         drivers=driver_dicts,
         fully_onboarded_drivers=fully_onboarded_only,
@@ -327,9 +331,8 @@ def dashboard():
         total_pages=total_pages,
         per_page=per_page,
         q=search_q,
-        lang=lang,
-        rtl=rtl,
-        all_businesses=all_businesses
+        all_businesses=all_businesses,
+        branches=Branch.query.filter(Branch.deleted_at.is_(None)).order_by(Branch.name).all(),
     )
 
 # -------------------------
@@ -744,3 +747,395 @@ def change_password():
         flash("Could not update password right now. Try again later.", "danger")
 
     return redirect(url_for("admin.dashboard"))
+
+
+# -------------------------
+# Onboarding Workflow Builder + Contract Template Manager
+#
+# Admin-editable data driving services/onboarding_workflow.py and
+# services/contracts.py - adding a driver type's stage sequence or a
+# platform's contract template happens here, not in code.
+# -------------------------
+@admin_bp.route("/workflow-config", methods=["GET"])
+@login_required
+def workflow_config():
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    driver_types = DriverType.query.filter(DriverType.deleted_at.is_(None)).order_by(DriverType.name).all()
+    stage_templates = OnboardingStageTemplate.query.order_by(
+        OnboardingStageTemplate.driver_type_id, OnboardingStageTemplate.sequence_order
+    ).all()
+    type_settings = {row.driver_type_id: row for row in DriverTypeSettings.query.all()}
+    contract_templates = ContractTemplate.query.order_by(ContractTemplate.name).all()
+    businesses = _cached_businesses()
+
+    stages_by_type = {}
+    for row in stage_templates:
+        stages_by_type.setdefault(row.driver_type_id, []).append(row)
+
+    return render_template(
+        "admin_workflow_config.html",
+        driver_types=driver_types,
+        stages_by_type=stages_by_type,
+        type_settings=type_settings,
+        contract_templates=contract_templates,
+        businesses=businesses,
+        stage_form=OnboardingStageTemplateForm(),
+        settings_form=DriverTypeSettingsForm(),
+        contract_form=ContractTemplateForm(),
+    )
+
+
+@admin_bp.route("/workflow-config/stage-template/add", methods=["POST"])
+@login_required
+def add_stage_template():
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = OnboardingStageTemplateForm()
+    if not form.validate_on_submit():
+        for field, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field}: {err}", "danger")
+        return redirect(url_for("admin.workflow_config"))
+
+    row = OnboardingStageTemplate(
+        driver_type_id=form.driver_type_id.data,
+        sequence_order=form.sequence_order.data,
+        stage_name=form.stage_name.data,
+        skip_condition_field=form.skip_condition_field.data or None,
+        skip_condition_value=form.skip_condition_value.data or None,
+    )
+    db.session.add(row)
+    try:
+        db.session.commit()
+        flash("Stage added to the onboarding sequence.", "success")
+    except IntegrityError:
+        db.session.rollback()
+        flash("That driver type already has a stage at this order position.", "danger")
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("[ADMIN] Failed to add stage template")
+        flash(f"Failed to add stage: {e}", "danger")
+
+    return redirect(url_for("admin.workflow_config"))
+
+
+@admin_bp.route("/workflow-config/stage-template/<int:row_id>/delete", methods=["POST"])
+@login_required
+def delete_stage_template(row_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.workflow_config"))
+
+    row = OnboardingStageTemplate.query.get_or_404(row_id)
+    db.session.delete(row)
+    db.session.commit()
+    flash("Stage removed from the onboarding sequence.", "success")
+    return redirect(url_for("admin.workflow_config"))
+
+
+@admin_bp.route("/workflow-config/driver-type-settings/save", methods=["POST"])
+@login_required
+def save_driver_type_settings():
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = DriverTypeSettingsForm()
+    if not form.validate_on_submit():
+        flash("Please choose a driver type and contract mode.", "danger")
+        return redirect(url_for("admin.workflow_config"))
+
+    settings = DriverTypeSettings.query.get(form.driver_type_id.data)
+    if settings:
+        settings.contract_mode = form.contract_mode.data
+    else:
+        settings = DriverTypeSettings(
+            driver_type_id=form.driver_type_id.data,
+            contract_mode=form.contract_mode.data,
+        )
+        db.session.add(settings)
+
+    db.session.commit()
+    flash("Driver type contract mode saved.", "success")
+    return redirect(url_for("admin.workflow_config"))
+
+
+@admin_bp.route("/workflow-config/contract-template/add", methods=["POST"])
+@login_required
+def add_contract_template():
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = ContractTemplateForm()
+    if not form.validate_on_submit():
+        for field, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field}: {err}", "danger")
+        return redirect(url_for("admin.workflow_config"))
+
+    template = ContractTemplate(
+        name=form.name.data,
+        business_id=form.business_id.data or None,
+        driver_type_id=form.driver_type_id.data or None,
+        body_content=form.body_content.data,
+        is_active=form.is_active.data,
+    )
+    db.session.add(template)
+    db.session.commit()
+    flash(f"Contract template '{template.name}' created.", "success")
+    return redirect(url_for("admin.workflow_config"))
+
+
+@admin_bp.route("/workflow-config/contract-template/<int:template_id>/toggle-active", methods=["POST"])
+@login_required
+def toggle_contract_template(template_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.workflow_config"))
+
+    template = ContractTemplate.query.get_or_404(template_id)
+    template.is_active = not template.is_active
+    db.session.commit()
+    flash(f"Contract template '{template.name}' is now {'active' if template.is_active else 'inactive'}.", "success")
+    return redirect(url_for("admin.workflow_config"))
+
+
+@admin_bp.route("/workflow-config/contract-template/<int:template_id>/delete", methods=["POST"])
+@login_required
+def delete_contract_template(template_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.workflow_config"))
+
+    template = ContractTemplate.query.get_or_404(template_id)
+    db.session.delete(template)
+    db.session.commit()
+    flash("Contract template deleted.", "success")
+    return redirect(url_for("admin.workflow_config"))
+
+
+# -------------------------
+# Per-user access: multi-role grants + standalone permission overrides
+#
+# This is what makes "give this Ops Manager extra Fleet access" or "let
+# this specific employee request offboarding regardless of role" an
+# admin-dashboard action instead of a code change.
+# -------------------------
+@admin_bp.route("/user/<int:user_id>/access", methods=["GET"])
+@login_required
+def user_access(user_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    user = User.query.get_or_404(user_id)
+    all_roles = Role.query.order_by(Role.name).all()
+    all_permissions = Permission.query.order_by(Permission.code).all()
+    granted_role_ids = {row.role_id for row in UserRole.query.filter_by(user_id=user.id).all()}
+    overrides = {row.permission_id: row.granted for row in UserPermission.query.filter_by(user_id=user.id).all()}
+
+    return render_template(
+        "admin_user_access.html",
+        user=user,
+        all_roles=all_roles,
+        all_permissions=all_permissions,
+        granted_role_ids=granted_role_ids,
+        overrides=overrides,
+    )
+
+
+@admin_bp.route("/user/<int:user_id>/access/roles", methods=["POST"])
+@login_required
+def save_user_roles(user_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.user_access", user_id=user_id))
+
+    user = User.query.get_or_404(user_id)
+    selected_role_ids = {int(v) for v in request.form.getlist("role_ids")}
+    all_roles = Role.query.all()
+
+    for role in all_roles:
+        if role.id in selected_role_ids:
+            grant_role(user, role.name)
+        else:
+            revoke_role(user, role.name)
+
+    db.session.commit()
+    flash(f"Roles updated for {user.username}.", "success")
+    return redirect(url_for("admin.user_access", user_id=user_id))
+
+
+@admin_bp.route("/user/<int:user_id>/access/permissions", methods=["POST"])
+@login_required
+def save_user_permissions(user_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.user_access", user_id=user_id))
+
+    user = User.query.get_or_404(user_id)
+    # Radio group per permission: "grant" | "revoke" | "inherit" (no override)
+    for perm in Permission.query.all():
+        choice = request.form.get(f"perm_{perm.id}", "inherit")
+        if choice == "grant":
+            set_permission_override(user, perm.code, True)
+        elif choice == "revoke":
+            set_permission_override(user, perm.code, False)
+        else:
+            clear_permission_override(user, perm.code)
+
+    db.session.commit()
+    flash(f"Permission overrides updated for {user.username}.", "success")
+    return redirect(url_for("admin.user_access", user_id=user_id))
+
+
+# ------------------------
+# Role management (create roles, define their default permissions)
+# ------------------------
+
+# Seeded by migrations/versions/20260707_rbac_workflow_config.py - these
+# names are still matched by raw-string role checks elsewhere in the app
+# (dobs_user.role, base.html's nav, ROLE_DASHBOARD_ENDPOINTS), so renaming
+# or deleting them here would silently desync those. Protected, not just by
+# convention - enforced in delete_role below.
+LEGACY_ROLE_NAMES = {
+    "SuperAdmin", "HR", "HRManager", "OpsManager", "OpsSupervisor",
+    "OpsCoordinator", "FleetManager", "Finance", "FinanceManager", "Admin",
+}
+
+
+@admin_bp.route("/roles", methods=["GET"])
+@login_required
+def roles():
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    all_roles = Role.query.order_by(Role.name).all()
+    user_counts = {
+        row[0]: row[1]
+        for row in db.session.query(UserRole.role_id, db.func.count(UserRole.user_id))
+        .group_by(UserRole.role_id).all()
+    }
+    return render_template(
+        "admin_roles.html",
+        roles=all_roles,
+        legacy_role_names=LEGACY_ROLE_NAMES,
+        user_counts=user_counts,
+        role_form=RoleForm(),
+    )
+
+
+@admin_bp.route("/roles/add", methods=["POST"])
+@login_required
+def add_role():
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = RoleForm()
+    if not form.validate_on_submit():
+        for field, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field}: {err}", "danger")
+        return redirect(url_for("admin.roles"))
+
+    if Role.query.filter_by(name=form.name.data).first():
+        flash("A role with that name already exists.", "danger")
+        return redirect(url_for("admin.roles"))
+
+    db.session.add(Role(name=form.name.data.strip(), description=form.description.data or None))
+    db.session.commit()
+    flash(f"Role '{form.name.data}' created.", "success")
+    return redirect(url_for("admin.roles"))
+
+
+@admin_bp.route("/roles/<int:role_id>/delete", methods=["POST"])
+@login_required
+def delete_role(role_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.roles"))
+
+    role = Role.query.get_or_404(role_id)
+    if role.name in LEGACY_ROLE_NAMES:
+        flash(f"'{role.name}' is a built-in role and cannot be deleted.", "danger")
+        return redirect(url_for("admin.roles"))
+
+    in_use = (
+        UserRole.query.filter_by(role_id=role.id).first()
+        or User.query.filter_by(role=role.name).first()
+    )
+    if in_use:
+        flash(f"'{role.name}' is still assigned to at least one user and cannot be deleted.", "danger")
+        return redirect(url_for("admin.roles"))
+
+    db.session.delete(role)
+    db.session.commit()
+    flash(f"Role '{role.name}' deleted.", "success")
+    return redirect(url_for("admin.roles"))
+
+
+@admin_bp.route("/roles/<int:role_id>/permissions", methods=["GET"])
+@login_required
+def role_permissions(role_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    role = Role.query.get_or_404(role_id)
+    all_permissions = Permission.query.order_by(Permission.code).all()
+    granted_codes = role_permission_codes(role)
+
+    grouped = {}
+    for perm in all_permissions:
+        category = perm.code.split(".")[0]
+        grouped.setdefault(category, []).append(perm)
+
+    return render_template(
+        "admin_role_permissions.html",
+        role=role,
+        grouped_permissions=grouped,
+        granted_codes=granted_codes,
+    )
+
+
+@admin_bp.route("/roles/<int:role_id>/permissions", methods=["POST"])
+@login_required
+def save_role_permissions(role_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.role_permissions", role_id=role_id))
+
+    role = Role.query.get_or_404(role_id)
+    selected_codes = set(request.form.getlist("permission_codes"))
+    set_role_permissions(role, selected_codes)
+    db.session.commit()
+    flash(f"Permissions updated for role '{role.name}'.", "success")
+    return redirect(url_for("admin.role_permissions", role_id=role_id))

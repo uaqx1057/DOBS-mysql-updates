@@ -1,0 +1,169 @@
+/*
+ * DOBS Animation Primitives
+ *
+ * Every keyframe referenced by components.css and dobs-ui.js lives here.
+ * All motion is disabled under prefers-reduced-motion (tokens.css already
+ * collapses --duration-* to ~0 in that case; the keyframes below are also
+ * explicitly neutralized as a second line of defense for anything using a
+ * hardcoded animation-duration).
+ */
+
+@keyframes dobs-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dobs-modal-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes dobs-slide-in-top {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes dobs-slide-in-end {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+[dir="rtl"] .toast-dobs {
+  animation-name: dobs-slide-in-end-rtl;
+}
+
+@keyframes dobs-slide-in-end-rtl {
+  from { opacity: 0; transform: translateX(-24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes dobs-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes dobs-stage-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(96, 34, 115, 0.45); }
+  50% { box-shadow: 0 0 0 8px rgba(96, 34, 115, 0); }
+}
+
+@keyframes dobs-drift {
+  from { transform: translate(0, 0) scale(1); }
+  to { transform: translate(40px, -30px) scale(1.15); }
+}
+
+/* Reveal-on-scroll utility, driven by dobs-ui.js's IntersectionObserver
+   toggling .is-visible - shared by any element opting in via .reveal. */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity var(--duration-slow) var(--ease-standard),
+    transform var(--duration-slow) var(--ease-standard);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Count-up number targets - dobs-ui.js animates the textContent directly,
+   this just gives the element a tabular layout so digits don't jitter. */
+.count-up {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Button/interactive press feedback used app-wide */
+.btn, .tab-btn, .nav-btn, button {
+  transition: transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.btn:active, .tab-btn:active, .nav-btn:active {
+  transform: scale(0.97);
+}
+
+/* ---- App shell entrance choreography ---- */
+@keyframes dobs-sidebar-in {
+  from { opacity: 0; transform: translateX(-14px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+[dir="rtl"] .app-sidebar { animation-name: dobs-sidebar-in-rtl; }
+
+@keyframes dobs-sidebar-in-rtl {
+  from { opacity: 0; transform: translateX(14px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.app-sidebar { animation: dobs-sidebar-in var(--duration-slower) var(--ease-emphasized) both; }
+
+@keyframes dobs-nav-item-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+[dir="rtl"] .sidebar-nav-item { animation-name: dobs-nav-item-in-rtl; }
+
+@keyframes dobs-nav-item-in-rtl {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.sidebar-nav-item {
+  animation: dobs-nav-item-in var(--duration-slow) var(--ease-standard) both;
+  animation-delay: var(--nav-i-delay, 0ms);
+}
+
+@keyframes dobs-topbar-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.app-topbar { animation: dobs-topbar-in var(--duration-slow) var(--ease-standard) both; }
+
+@keyframes dobs-title-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.topbar-title { animation: dobs-title-in var(--duration-base) var(--ease-standard) both; animation-delay: 80ms; }
+
+/* ---- Full-page cross-fade on navigation, via the View Transitions API ----
+   Progressive enhancement: <meta name="view-transition"> in base.html opts
+   every same-origin navigation in. Browsers without support just navigate
+   normally with no animation - nothing to feature-detect here. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root) {
+    animation: dobs-vt-out var(--duration-base) var(--ease-standard) both;
+  }
+  ::view-transition-new(root) {
+    animation: dobs-vt-in var(--duration-slow) var(--ease-emphasized) both;
+  }
+}
+
+@keyframes dobs-vt-out {
+  to { opacity: 0; transform: translateY(-6px) scale(0.995); }
+}
+
+@keyframes dobs-vt-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.995); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+
+  .ambient-bg .blob {
+    animation: none;
+  }
+}

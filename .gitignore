@@ -15,3 +15,6 @@ app.log
 /static/uploads
 /static/uploads
 *.png
+graphify-out/
+.venv
+instance/

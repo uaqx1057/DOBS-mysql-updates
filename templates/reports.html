@@ -1,542 +1,170 @@
-<!DOCTYPE html>
-<html lang="{{ current_lang or 'en' }}" dir="{{ text_direction or 'ltr' }}">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Driver Reports | DOBS</title>
-  <link rel="icon" type="image/x-icon" href="static/Home_09_Onepage_files/logo1.png">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <style>
-    :root {
-      --primary-color: #602273;
-      --primary-dark: #4a1a5c;
-      --primary-light: #7a2f8f;
-      --success-color: #27ae60;
-      --warning-color: #f39c12;
-      --danger-color: #e74c3c;
-      --info-color: #3498db;
-      --bg-main: #f4f7f9;
-      --bg-card: #ffffff;
-      --text-primary: #2c3e50;
-      --text-secondary: #7f8c8d;
-      --border-color: #e1e8ed;
-      --shadow-sm: 0 2px 4px rgba(0,0,0,0.04);
-      --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
-      --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
-      --radius-md: 10px;
-      --radius-lg: 14px;
-    }
+{% extends "base.html" %}
 
-    body {
-      background: var(--bg-main);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      color: var(--text-primary);
-      padding: 0;
-      margin: 0;
-    }
+{% block title %}{{ tr('Driver Reports', 'تقارير السائقين') }} — DOBS{% endblock %}
+{% block navbar_title %}{{ tr('Reports', 'التقارير') }}{% endblock %}
 
-    .page-header {
-      background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-      color: white;
-      padding: 32px 24px;
-      margin-bottom: 32px;
-      box-shadow: var(--shadow-md);
-    }
+{% block head_extra %}
+<style>
+  .filter-section { background: var(--bg-surface); border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow-sm); margin-bottom: var(--space-6); }
+  .filter-title { font-size: var(--text-base); font-weight: var(--font-weight-semibold); margin-bottom: var(--space-4); }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-6); }
+  .stat-card { background: var(--bg-surface); padding: var(--space-5); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); border-inline-start: 4px solid; transition: transform var(--duration-base) var(--ease-standard), box-shadow var(--duration-base) var(--ease-standard); }
+  .stat-card.clickable { cursor: pointer; }
+  .stat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+  .stat-card.primary { border-color: var(--primary); }
+  .stat-card.success { border-color: var(--success); }
+  .stat-card.warning { border-color: var(--warning); }
+  .stat-card.danger { border-color: var(--danger); }
+  .stat-card.info { border-color: var(--info); }
+  .stat-card.secondary { border-color: var(--gray-400); }
+  .stat-card .stat-label { font-size: var(--text-xs); font-weight: var(--font-weight-semibold); color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: var(--space-2); }
+  .stat-card .stat-value { font-size: var(--text-3xl); font-weight: var(--font-weight-bold); font-variant-numeric: tabular-nums; }
+  .stat-card .stat-sub { font-size: var(--text-xs); color: var(--text-secondary); margin-top: var(--space-1); }
+  .export-section { background: var(--bg-surface); border-radius: var(--radius-md); padding: var(--space-4) var(--space-5); box-shadow: var(--shadow-sm); margin-bottom: var(--space-5); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+  .btn-export { padding: var(--space-2) var(--space-4); border-radius: var(--radius-md); font-weight: var(--font-weight-semibold); font-size: var(--text-sm); border: 2px solid; text-decoration: none; transition: all var(--duration-fast) var(--ease-standard); }
+  .btn-csv { background: transparent; color: var(--success); border-color: var(--success); }
+  .btn-csv:hover { background: var(--success); color: #fff; }
+  .btn-pdf { background: transparent; color: var(--danger); border-color: var(--danger); }
+  .btn-pdf:hover { background: var(--danger); color: #fff; }
+  .table-card { background: var(--bg-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+  .table-header { padding: var(--space-4) var(--space-5); border-bottom: 2px solid var(--border-color); }
+  .table-responsive { max-height: 600px; overflow-y: auto; }
+  .table thead th { background: var(--primary); color: #fff; position: sticky; top: 0; }
+  .no-data { text-align: center; padding: var(--space-12) var(--space-5); color: var(--text-secondary); }
+</style>
+{% endblock %}
 
-    .page-title {
-      font-size: 32px;
-      font-weight: 700;
-      margin: 0;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+{% block content %}
+<div class="page-header reveal">
+  <h1 class="page-title">{{ tr('Driver Reports', 'تقارير السائقين') }}</h1>
+</div>
 
-    .page-subtitle {
-      font-size: 15px;
-      opacity: 0.9;
-      margin-top: 8px;
-    }
-
-    .container-main {
-      max-width: 1400px;
-      margin: 0 auto;
-    }
-
-    .filter-section {
-      background: var(--bg-card);
-      border-radius: var(--radius-lg);
-      padding: 24px;
-      box-shadow: var(--shadow-sm);
-      margin-bottom: 28px;
-    }
-
-    .filter-title {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 20px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .form-label {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-    }
-
-    .form-select, .form-control {
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-size: 14px;
-      transition: all 0.2s;
-    }
-
-    .form-select:focus, .form-control:focus {
-      border-color: var(--primary-color);
-      box-shadow: 0 0 0 3px rgba(96, 34, 115, 0.1);
-    }
-
-    .btn-generate {
-      background: var(--primary-color);
-      border: none;
-      color: white;
-      padding: 11px 24px;
-      border-radius: 8px;
-      font-weight: 600;
-      transition: all 0.2s;
-    }
-
-    .btn-generate:hover {
-      background: var(--primary-dark);
-      transform: translateY(-1px);
-      box-shadow: var(--shadow-md);
-    }
-
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 20px;
-      margin-bottom: 28px;
-    }
-
-    .stat-card {
-      background: var(--bg-card);
-      padding: 24px;
-      border-radius: var(--radius-md);
-      box-shadow: var(--shadow-sm);
-      transition: all 0.2s;
-      border-left: 4px solid;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .stat-card.clickable { cursor: pointer; }
-    .stat-sub { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
-
-    .stat-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      right: 0;
-      width: 80px;
-      height: 80px;
-      opacity: 0.08;
-      border-radius: 50%;
-      transform: translate(30%, -30%);
-    }
-
-    .stat-card:hover {
-      transform: translateY(-3px);
-      box-shadow: var(--shadow-lg);
-    }
-
-    .stat-card.primary { border-left-color: var(--primary-color); }
-    .stat-card.primary::before { background: var(--primary-color); }
-    .stat-card.success { border-left-color: var(--success-color); }
-    .stat-card.success::before { background: var(--success-color); }
-    .stat-card.warning { border-left-color: var(--warning-color); }
-    .stat-card.warning::before { background: var(--warning-color); }
-    .stat-card.danger { border-left-color: var(--danger-color); }
-    .stat-card.danger::before { background: var(--danger-color); }
-    .stat-card.info { border-left-color: var(--info-color); }
-    .stat-card.info::before { background: var(--info-color); }
-    .stat-card.secondary { border-left-color: #6c757d; }
-    .stat-card.secondary::before { background: #6c757d; }
-
-    .stat-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .stat-value {
-      font-size: 36px;
-      font-weight: 700;
-      color: var(--text-primary);
-      line-height: 1;
-    }
-
-    .export-section {
-      background: var(--bg-card);
-      border-radius: var(--radius-md);
-      padding: 20px 24px;
-      box-shadow: var(--shadow-sm);
-      margin-bottom: 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .export-title {
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin: 0;
-    }
-
-    .export-buttons {
-      display: flex;
-      gap: 12px;
-    }
-
-    .btn-export {
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 14px;
-      border: 2px solid;
-      transition: all 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      text-decoration: none;
-    }
-
-    .btn-csv {
-      background: white;
-      color: var(--success-color);
-      border-color: var(--success-color);
-    }
-
-    .btn-csv:hover {
-      background: var(--success-color);
-      color: white;
-      transform: translateY(-2px);
-      box-shadow: var(--shadow-md);
-    }
-
-    .btn-pdf {
-      background: white;
-      color: var(--danger-color);
-      border-color: var(--danger-color);
-    }
-
-    .btn-pdf:hover {
-      background: var(--danger-color);
-      color: white;
-      transform: translateY(-2px);
-      box-shadow: var(--shadow-md);
-    }
-
-    .table-card {
-      background: var(--bg-card);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-sm);
-      overflow: hidden;
-    }
-
-    .table-header {
-      padding: 20px 24px;
-      border-bottom: 2px solid var(--border-color);
-    }
-
-    .table-header h5 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .table-responsive {
-      max-height: 600px;
-      overflow-y: auto;
-    }
-
-    .table {
-      margin: 0;
-    }
-
-    .table thead th {
-      background: var(--primary-color);
-      color: white;
-      font-weight: 600;
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-      padding: 14px 16px;
-      border: none;
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-
-    .table tbody td {
-      padding: 14px 16px;
-      font-size: 14px;
-      color: var(--text-primary);
-      border-bottom: 1px solid var(--border-color);
-      vertical-align: middle;
-    }
-
-    .table tbody tr {
-      transition: all 0.15s;
-    }
-
-    .table tbody tr:hover {
-      background: rgba(96, 34, 115, 0.03);
-    }
-
-    .badge {
-      padding: 6px 12px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.3px;
-    }
-
-    .no-data {
-      text-align: center;
-      padding: 60px 24px;
-      color: var(--text-secondary);
-      font-size: 16px;
-    }
-
-    .no-data i {
-      font-size: 48px;
-      color: var(--border-color);
-      margin-bottom: 16px;
-    }
-
-    .header-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-    }
-
-    .lang-switch {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 14px;
-      border-radius: 8px;
-      font-weight: 600;
-      text-decoration: none;
-      color: #fff;
-      border: 1px solid rgba(255, 255, 255, 0.35);
-      background: rgba(255, 255, 255, 0.14);
-      transition: background 0.2s ease, border 0.2s ease;
-      white-space: nowrap;
-    }
-
-    .lang-switch:hover {
-      background: rgba(255, 255, 255, 0.22);
-    }
-
-    @media (max-width: 768px) {
-      .stats-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-
-      .export-section {
-        flex-direction: column;
-        gap: 16px;
-        align-items: stretch;
-      }
-
-      .export-buttons {
-        flex-direction: column;
-      }
-    }
-  </style>
-</head>
-<body>
-{% macro tr(en_text, ar_text) -%}
-  {{ en_text if (current_lang or 'en') == 'en' else ar_text }}
-{%- endmacro %}
-
-  <!-- Page Header -->
-  <div class="page-header">
-    <div class="container-main header-top">
-      <div>
-        <h1 class="page-title">
-          <i class="fas fa-chart-bar"></i>
-          {{ tr('Driver Reports', 'تقارير السائقين') }}
-        </h1>
-      </div>
-          <!-- ================== Filters ================== -->
-    <div class="filter-section">
-      <h6 class="filter-title"><i class="fas fa-filter"></i> {{ tr('Report Filters', 'فلاتر التقرير') }}</h6>
-      <form method="POST" class="row g-3">
-      {{ form.hidden_tag() }}
-      <div class="col-md-2">
-        <label class="form-label">{{ tr('Report Type', 'نوع التقرير') }}</label>
-        <select class="form-select" name="report_type">
-          <option value="all" {% if report_type=='all' or not report_type %}selected{% endif %}>{{ tr('All Drivers', 'كل السائقين') }}</option>
-          <option value="onboarding" {% if report_type=='onboarding' %}selected{% endif %}>{{ tr('Onboarded', 'المكتملون') }}</option>
+<div class="filter-section reveal">
+  <h6 class="filter-title">{{ tr('Report Filters', 'فلاتر التقرير') }}</h6>
+  <form method="POST" class="row g-3">
+    {{ form.hidden_tag() }}
+    <div class="col-md-2">
+      <label class="form-label">{{ tr('Report Type', 'نوع التقرير') }}</label>
+      <select class="form-select" name="report_type">
+        <option value="all" {% if report_type=='all' or not report_type %}selected{% endif %}>{{ tr('All Drivers', 'كل السائقين') }}</option>
+        <option value="onboarding" {% if report_type=='onboarding' %}selected{% endif %}>{{ tr('Onboarded', 'المكتملون') }}</option>
         <option value="pending_onboarding" {% if report_type=='pending_onboarding' %}selected{% endif %}>{{ tr('Pending Onboarding', 'قيد الإكمال') }}</option>
         <option value="offboarding" {% if report_type=='offboarding' %}selected{% endif %}>{{ tr('Completed Offboarding', 'إخلاء مكتمل') }}</option>
         <option value="pending_offboarding" {% if report_type=='pending_offboarding' %}selected{% endif %}>{{ tr('Pending Offboarding', 'إخلاء قيد الإنجاز') }}</option>
-          <option value="rejected" {% if report_type=='rejected' %}selected{% endif %}>{{ tr('Rejected', 'مرفوضون') }}</option>
-          <!-- Hidden options for combined pending cards -->
-          <option value="pending_ops_manager_all" {% if report_type=='pending_ops_manager_all' %}selected{% endif %} hidden>Pending Ops Manager (All)</option>
-          <option value="pending_hr_all" {% if report_type=='pending_hr_all' %}selected{% endif %} hidden>Pending HR (All)</option>
-          <option value="pending_ops_supervisor_all" {% if report_type=='pending_ops_supervisor_all' %}selected{% endif %} hidden>Pending Ops Supervisor (All)</option>
-          <option value="pending_fleet_manager_all" {% if report_type=='pending_fleet_manager_all' %}selected{% endif %} hidden>Pending Fleet Manager (All)</option>
-          <option value="pending_finance_all" {% if report_type=='pending_finance_all' %}selected{% endif %} hidden>Pending Finance (All)</option>
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">{{ tr('Start Date', 'تاريخ البدء') }}</label>
-          <input type="date" class="form-control" name="start_date" value="{{ start_date or '' }}">
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">{{ tr('End Date', 'تاريخ الانتهاء') }}</label>
-          <input type="date" class="form-control" name="end_date" value="{{ end_date or '' }}">
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">{{ tr('City', 'المدينة') }}</label>
-        <select class="form-select" name="city">
+        <option value="rejected" {% if report_type=='rejected' %}selected{% endif %}>{{ tr('Rejected', 'مرفوضون') }}</option>
+        <option value="pending_ops_manager_all" {% if report_type=='pending_ops_manager_all' %}selected{% endif %} hidden>Pending Ops Manager (All)</option>
+        <option value="pending_hr_all" {% if report_type=='pending_hr_all' %}selected{% endif %} hidden>Pending HR (All)</option>
+        <option value="pending_ops_supervisor_all" {% if report_type=='pending_ops_supervisor_all' %}selected{% endif %} hidden>Pending Ops Supervisor (All)</option>
+        <option value="pending_fleet_manager_all" {% if report_type=='pending_fleet_manager_all' %}selected{% endif %} hidden>Pending Fleet Manager (All)</option>
+        <option value="pending_finance_all" {% if report_type=='pending_finance_all' %}selected{% endif %} hidden>Pending Finance (All)</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">{{ tr('Start Date', 'تاريخ البدء') }}</label>
+      <input type="date" class="form-control" name="start_date" value="{{ start_date or '' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">{{ tr('End Date', 'تاريخ الانتهاء') }}</label>
+      <input type="date" class="form-control" name="end_date" value="{{ end_date or '' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">{{ tr('City', 'المدينة') }}</label>
+      <select class="form-select" name="city">
         <option value="All" {% if city=='All' or not city %}selected{% endif %}>{{ tr('All Cities', 'كل المدن') }}</option>
         {% for c in saudi_cities %}
-          <option value="{{ c }}" {% if city==c %}selected{% endif %}>{{ c }}</option>
+        <option value="{{ c }}" {% if city==c %}selected{% endif %}>{{ c }}</option>
         {% endfor %}
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">{{ tr('Transfer Status', 'حالة النقل') }}</label>
-        <select class="form-select" name="transfer_status">
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">{{ tr('Transfer Status', 'حالة النقل') }}</label>
+      <select class="form-select" name="transfer_status">
         <option value="" {% if transfer_status=='' or not transfer_status %}selected{% endif %}>{{ tr('All', 'الكل') }}</option>
         <option value="transferred" {% if transfer_status=='transferred' %}selected{% endif %}>{{ tr('Transferred', 'تم النقل') }}</option>
-          <option value="not_transferred" {% if transfer_status=='not_transferred' %}selected{% endif %}>{{ tr('Not Transferred', 'لم يتم النقل') }}</option>
-        </select>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label">&nbsp;</label>
-        <button type="submit" class="btn btn-generate w-100"><i class="fas fa-sync-alt me-2"></i>{{ tr('Generate Report', 'توليد التقرير') }}</button>
-      </div>
-      </form>
+        <option value="not_transferred" {% if transfer_status=='not_transferred' %}selected{% endif %}>{{ tr('Not Transferred', 'لم يتم النقل') }}</option>
+      </select>
     </div>
-      <div>
-        {% set next_lang = 'ar' if (current_lang or 'en') != 'ar' else 'en' %}
-        {% set next_label = 'العربية' if next_lang == 'ar' else 'English' %}
-        <a class="lang-switch" href="{{ url_for('public.set_language', lang=next_lang, next=request.full_path) }}">{{ next_label }}</a>
-      </div>
+    <div class="col-md-2">
+      <label class="form-label">&nbsp;</label>
+      <button type="submit" class="btn btn-primary w-100">{{ tr('Generate Report', 'توليد التقرير') }}</button>
     </div>
+  </form>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card primary clickable reveal" data-report-type="all">
+    <div class="stat-label">{{ tr('Total Drivers', 'إجمالي السائقين') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ total_drivers }}">0</div>
   </div>
+  <div class="stat-card success clickable reveal" data-report-type="onboarding">
+    <div class="stat-label">{{ tr('Completed Onboarded', 'المكتملون') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ completed_onboarded }}">0</div>
+  </div>
+  <div class="stat-card warning clickable reveal" data-report-type="pending_onboarding">
+    <div class="stat-label">{{ tr('Pending Onboarded', 'قيد الإكمال') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ pending_onboarded }}">0</div>
+  </div>
+  <div class="stat-card info clickable reveal" data-report-type="offboarding">
+    <div class="stat-label">{{ tr('Completed Offboarded', 'إخلاء مكتمل') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ completed_offboarded }}">0</div>
+  </div>
+  <div class="stat-card warning clickable reveal" data-report-type="pending_offboarding">
+    <div class="stat-label">{{ tr('Pending Offboarded', 'إخلاء قيد الإنجاز') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ pending_offboarded }}">0</div>
+  </div>
+  <div class="stat-card danger clickable reveal" data-report-type="rejected">
+    <div class="stat-label">{{ tr('Rejected Drivers', 'السائقون المرفوضون') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ rejected_drivers }}">0</div>
+  </div>
+</div>
 
-  <div class="container-main">
+<div class="stats-grid">
+  <div class="stat-card secondary reveal">
+    <div class="stat-label">{{ tr('Monthly Transfers', 'التحويلات الشهرية') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ monthly_transfers_completed }}">0</div>
+  </div>
+  <div class="stat-card primary clickable reveal" data-report-type="pending_ops_manager_all">
+    <div class="stat-label">{{ tr('Pending Ops Manager', 'المعلَّق لدى مدير العمليات') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ pending_ops_manager_on + pending_ops_manager_off }}">0</div>
+    <div class="stat-sub">{{ tr('Onboarding', 'توظيف') }}: {{ pending_ops_manager_on }} &nbsp;|&nbsp; {{ tr('Offboarding', 'إنهاء') }}: {{ pending_ops_manager_off }}</div>
+  </div>
+  <div class="stat-card success clickable reveal" data-report-type="pending_hr_all">
+    <div class="stat-label">{{ tr('Pending HR', 'المعلَّق لدى الموارد البشرية') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ pending_hr_on + pending_hr_off }}">0</div>
+    <div class="stat-sub">{{ tr('Onboarding', 'توظيف') }}: {{ pending_hr_on }} &nbsp;|&nbsp; {{ tr('Offboarding', 'إنهاء') }}: {{ pending_hr_off }}</div>
+  </div>
+  <div class="stat-card warning clickable reveal" data-report-type="pending_ops_supervisor_all">
+    <div class="stat-label">{{ tr('Pending Ops Supervisor', 'المعلَّق لدى مشرف العمليات') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ pending_ops_supervisor_on + pending_ops_supervisor_off }}">0</div>
+    <div class="stat-sub">{{ tr('Onboarding', 'توظيف') }}: {{ pending_ops_supervisor_on }} &nbsp;|&nbsp; {{ tr('Offboarding', 'إنهاء') }}: {{ pending_ops_supervisor_off }}</div>
+  </div>
+  <div class="stat-card info clickable reveal" data-report-type="pending_fleet_manager_all">
+    <div class="stat-label">{{ tr('Pending Fleet Manager', 'المعلَّق لدى مدير الأسطول') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ pending_fleet_manager_on + pending_fleet_manager_off }}">0</div>
+    <div class="stat-sub">{{ tr('Onboarding', 'توظيف') }}: {{ pending_fleet_manager_on }} &nbsp;|&nbsp; {{ tr('Offboarding', 'إنهاء') }}: {{ pending_fleet_manager_off }}</div>
+  </div>
+  <div class="stat-card danger clickable reveal" data-report-type="pending_finance_all">
+    <div class="stat-label">{{ tr('Pending Finance', 'المعلَّق لدى المالية') }}</div>
+    <div class="stat-value count-up" data-count-to="{{ pending_finance_on + pending_finance_off }}">0</div>
+    <div class="stat-sub">{{ tr('Onboarding', 'توظيف') }}: {{ pending_finance_on }} &nbsp;|&nbsp; {{ tr('Offboarding', 'إنهاء') }}: {{ pending_finance_off }}</div>
+  </div>
+</div>
 
+<div class="export-section reveal">
+  <h6 class="mb-0 fw-semibold">{{ tr('Export Report', 'تصدير التقرير') }}</h6>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('reports_bp.export_csv', report_type=report_type, start_date=start_date, end_date=end_date, city=city, transfer_status=transfer_status) }}" class="btn-export btn-csv">{{ tr('Export CSV', 'تصدير CSV') }}</a>
+    <a href="{{ url_for('reports_bp.export_pdf', report_type=report_type, start_date=start_date, end_date=end_date, city=city, transfer_status=transfer_status) }}" class="btn-export btn-pdf">{{ tr('Export PDF', 'تصدير PDF') }}</a>
+  </div>
+</div>
 
-    <!-- ================== Summary Cards ================== -->
-    <div class="stats-grid">
-      <div class="stat-card primary clickable" data-report-type="all">
-        <div class="stat-label"><i class="fas fa-users"></i> {{ tr('Total Drivers', 'إجمالي السائقين') }}</div>
-        <div class="stat-value">{{ total_drivers }}</div>
-      </div>
-      <div class="stat-card success clickable" data-report-type="onboarding">
-        <div class="stat-label"><i class="fas fa-check-circle"></i> {{ tr('Completed Onboarded', 'المكتملون') }}</div>
-        <div class="stat-value">{{ completed_onboarded }}</div>
-      </div>
-      <div class="stat-card warning clickable" data-report-type="pending_onboarding">
-        <div class="stat-label"><i class="fas fa-clock"></i> {{ tr('Pending Onboarded', 'قيد الإكمال') }}</div>
-        <div class="stat-value">{{ pending_onboarded }}</div>
-      </div>
-      <div class="stat-card info clickable" data-report-type="offboarding">
-        <div class="stat-label"><i class="fas fa-user-check"></i> {{ tr('Completed Offboarded', 'إخلاء مكتمل') }}</div>
-        <div class="stat-value">{{ completed_offboarded }}</div>
-      </div>
-      <div class="stat-card warning clickable" data-report-type="pending_offboarding">
-        <div class="stat-label"><i class="fas fa-hourglass-half"></i> {{ tr('Pending Offboarded', 'إخلاء قيد الإنجاز') }}</div>
-        <div class="stat-value">{{ pending_offboarded }}</div>
-      </div>
-      <div class="stat-card danger clickable" data-report-type="rejected">
-        <div class="stat-label"><i class="fas fa-times-circle"></i> {{ tr('Rejected Drivers', 'السائقون المرفوضون') }}</div>
-        <div class="stat-value">{{ rejected_drivers }}</div>
-      </div>
-    </div>
-
-    <!-- ================== Additional Reports ================== -->
-
-    <div class="stats-grid">
-      <div class="stat-card secondary">
-        <div class="stat-label"><i class="fas fa-calendar-alt"></i> {{ tr('Monthly Transfers', 'التحويلات الشهرية') }}</div>
-        <div class="stat-value">{{ monthly_transfers_completed }}</div>
-      </div>
-      <div class="stat-card primary clickable" data-report-type="pending_ops_manager_all">
-        <div class="stat-label"><i class="fas fa-user-tie"></i> {{ tr('Pending Ops Manager', 'المعلَّق لدى مدير العمليات') }}</div>
-        <div class="stat-value">{{ pending_ops_manager_on + pending_ops_manager_off }}</div>
-        <div class="stat-sub">{{ tr('Onboarding', 'توظيف') }}: {{ pending_ops_manager_on }} &nbsp;|&nbsp; {{ tr('Offboarding', 'إنهاء') }}: {{ pending_ops_manager_off }}</div>
-      </div>
-      <div class="stat-card success clickable" data-report-type="pending_hr_all">
-        <div class="stat-label"><i class="fas fa-user-friends"></i> {{ tr('Pending HR', 'المعلَّق لدى الموارد البشرية') }}</div>
-        <div class="stat-value">{{ pending_hr_on + pending_hr_off }}</div>
-        <div class="stat-sub">{{ tr('Onboarding', 'توظيف') }}: {{ pending_hr_on }} &nbsp;|&nbsp; {{ tr('Offboarding', 'إنهاء') }}: {{ pending_hr_off }}</div>
-      </div>
-      <div class="stat-card warning clickable" data-report-type="pending_ops_supervisor_all">
-        <div class="stat-label"><i class="fas fa-user-cog"></i> {{ tr('Pending Ops Supervisor', 'المعلَّق لدى مشرف العمليات') }}</div>
-        <div class="stat-value">{{ pending_ops_supervisor_on + pending_ops_supervisor_off }}</div>
-        <div class="stat-sub">{{ tr('Onboarding', 'توظيف') }}: {{ pending_ops_supervisor_on }} &nbsp;|&nbsp; {{ tr('Offboarding', 'إنهاء') }}: {{ pending_ops_supervisor_off }}</div>
-      </div>
-      <div class="stat-card info clickable" data-report-type="pending_fleet_manager_all">
-        <div class="stat-label"><i class="fas fa-car"></i> {{ tr('Pending Fleet Manager', 'المعلَّق لدى مدير الأسطول') }}</div>
-        <div class="stat-value">{{ pending_fleet_manager_on + pending_fleet_manager_off }}</div>
-        <div class="stat-sub">{{ tr('Onboarding', 'توظيف') }}: {{ pending_fleet_manager_on }} &nbsp;|&nbsp; {{ tr('Offboarding', 'إنهاء') }}: {{ pending_fleet_manager_off }}</div>
-      </div>
-      <div class="stat-card danger clickable" data-report-type="pending_finance_all">
-        <div class="stat-label"><i class="fas fa-dollar-sign"></i> {{ tr('Pending Finance', 'المعلَّق لدى المالية') }}</div>
-        <div class="stat-value">{{ pending_finance_on + pending_finance_off }}</div>
-        <div class="stat-sub">{{ tr('Onboarding', 'توظيف') }}: {{ pending_finance_on }} &nbsp;|&nbsp; {{ tr('Offboarding', 'إنهاء') }}: {{ pending_finance_off }}</div>
-      </div>
-    </div>
-
-    <!-- ================== Export Buttons ================== -->
-    <div class="export-section">
-      <h6 class="export-title"><i class="fas fa-download"></i> {{ tr('Export Report', 'تصدير التقرير') }}</h6>
-      <div class="export-buttons">
-        <a href="{{ url_for('reports_bp.export_csv', report_type=report_type, start_date=start_date, end_date=end_date, city=city, transfer_status=transfer_status) }}" class="btn-export btn-csv">
-          <i class="fas fa-file-csv"></i> {{ tr('Export CSV', 'تصدير CSV') }}
-        </a>
-        <a href="{{ url_for('reports_bp.export_pdf', report_type=report_type, start_date=start_date, end_date=end_date, city=city, transfer_status=transfer_status) }}" class="btn-export btn-pdf">
-          <i class="fas fa-file-pdf"></i> {{ tr('Export PDF', 'تصدير PDF') }}
-        </a>
-      </div>
-    </div>
-
-    <!-- ================== Drivers Table ================== -->
-    {% if drivers %}
-    <div class="table-card">
-      <div class="table-header">
-        <h5><i class="fas fa-table"></i> {{ tr('Driver Records', 'سجلات السائقين') }} ({{ drivers|length }} {{ tr('entries', 'سجل') }})</h5>
-      </div>
-      <div class="table-responsive">
-        <table class="table">
-          <thead>
-            <tr>
+{% if drivers %}
+<div class="table-card reveal">
+  <div class="table-header"><h5 class="mb-0 fw-semibold">{{ tr('Driver Records', 'سجلات السائقين') }} ({{ drivers|length }} {{ tr('entries', 'سجل') }})</h5></div>
+  <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
           <th>{{ tr('ID', 'المعرف') }}</th>
           <th>{{ tr('Full Name', 'الاسم الكامل') }}</th>
           <th>{{ tr('Iqama Number', 'رقم الإقامة') }}</th>
@@ -581,76 +209,63 @@
             {{ platform_label or '—' }}
           </td>
           <td>{{ d.assignment_date.strftime("%Y-%m-%d") if d.assignment_date else "" }}</td>
-
-          <!-- Transfer Done Badge -->
           <td>
             {% if d.sponsorship_transfer_status in ['Completed', 'Transferred', 'Approved'] %}
-              <span class="badge bg-success">{{ tr('Yes', 'نعم') }}</span>
+              <span class="badge-soft success">{{ tr('Yes', 'نعم') }}</span>
             {% elif d.sponsorship_transfer_status == 'Pending' %}
-              <span class="badge bg-warning text-dark">{{ tr('No', 'لا') }}</span>
+              <span class="badge-soft warning">{{ tr('No', 'لا') }}</span>
             {% elif d.sponsorship_transfer_status == 'Not Required' %}
-              <span class="badge bg-secondary">{{ tr('N/A', 'غير مطلوب') }}</span>
+              <span class="badge-soft neutral">{{ tr('N/A', 'غير مطلوب') }}</span>
             {% else %}
-              <span class="badge bg-secondary">{{ tr('Unknown', 'غير معروف') }}</span>
+              <span class="badge-soft neutral">{{ tr('Unknown', 'غير معروف') }}</span>
             {% endif %}
           </td>
-
-
-          <!-- Onboarding Stage Badge -->
           <td>
             {% set stage = d.onboarding_stage or 'Pending' %}
             {% if stage == 'Completed' %}
-              <span class="badge bg-success">{{ tr('Completed', 'مكتمل') }}</span>
+              <span class="badge-soft success">{{ tr('Completed', 'مكتمل') }}</span>
             {% elif stage in ['Ops Manager', 'HR'] %}
-              <span class="badge bg-primary">{{ tr(stage, stage) }}</span>
+              <span class="badge-soft info">{{ tr(stage, stage) }}</span>
             {% elif stage in ['Ops Supervisor', 'Fleet Manager'] %}
-              <span class="badge bg-info text-dark">{{ tr(stage, stage) }}</span>
+              <span class="badge-soft info">{{ tr(stage, stage) }}</span>
             {% elif stage == 'Finance' %}
-              <span class="badge bg-warning text-dark">{{ tr('Finance', 'المالية') }}</span>
+              <span class="badge-soft warning">{{ tr('Finance', 'المالية') }}</span>
             {% elif stage == 'Rejected' %}
-              <span class="badge bg-danger">{{ tr('Rejected', 'مرفوض') }}</span>
+              <span class="badge-soft danger">{{ tr('Rejected', 'مرفوض') }}</span>
             {% else %}
-              <span class="badge bg-secondary">{{ tr(stage, 'قيد المعالجة') }}</span>
+              <span class="badge-soft neutral">{{ tr(stage, 'قيد المعالجة') }}</span>
             {% endif %}
           </td>
         </tr>
         {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    {% else %}
-    <div class="table-card">
-      <div class="no-data">
-        <i class="fas fa-inbox"></i>
-        <p>{{ tr('No drivers found for selected filters.<br>Try adjusting your filter criteria.', 'لا توجد سائقون وفق الفلاتر المحددة.<br>حاول تعديل معايير الفلترة.') }}</p>
-      </div>
-    </div>
-    {% endif %}
+      </tbody>
+    </table>
   </div>
+</div>
+{% else %}
+<div class="table-card">
+  <div class="no-data">
+    <p>{{ tr('No drivers found for selected filters. Try adjusting your filter criteria.', 'لا توجد سائقون وفق الفلاتر المحددة. حاول تعديل معايير الفلترة.') }}</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
 
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      const form = document.querySelector('.filter-section form');
-      if (!form) return;
-      const reportSelect = form.querySelector('select[name="report_type"]');
-      const cards = document.querySelectorAll('.stat-card.clickable[data-report-type]');
-
-      cards.forEach((card) => {
-        card.addEventListener('click', () => {
-          const target = card.dataset.reportType;
-          if (!target || !reportSelect) return;
-          reportSelect.value = target;
-          if (typeof form.requestSubmit === 'function') {
-            form.requestSubmit();
-          } else {
-            form.submit();
-          }
-        });
-      });
+{% block scripts_extra %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var form = document.querySelector('.filter-section form');
+  if (!form) return;
+  var reportSelect = form.querySelector('select[name="report_type"]');
+  document.querySelectorAll('.stat-card.clickable[data-report-type]').forEach(function (card) {
+    card.addEventListener('click', function () {
+      var target = card.dataset.reportType;
+      if (!target || !reportSelect) return;
+      reportSelect.value = target;
+      if (typeof form.requestSubmit === 'function') form.requestSubmit();
+      else form.submit();
     });
-  </script>
-
-{% include 'includes/csrf_auto.html' %}
-</body>
-</html>
+  });
+});
+</script>
+{% endblock %}

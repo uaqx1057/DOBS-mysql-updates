@@ -274,6 +274,14 @@ def create_app():
             "text_direction": getattr(g, "text_direction", "ltr"),
         }
 
+    def tr(en_text, ar_text):
+        """Inline bilingual text helper, available in every template as
+        {{ tr('English', 'Arabic') }} - promoted from what was previously a
+        local macro duplicated per-template (see templates/reports.html)."""
+        return en_text if getattr(g, "current_lang", "en") == "en" else ar_text
+
+    app.jinja_env.globals["tr"] = tr
+
     # --- Front page route ---
     @app.route("/")
     def front_page():

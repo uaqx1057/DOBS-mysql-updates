@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\Users\\Usman\\Documents\\GitHub\\DOBS-mysql-updates"
+      ]
+    },
+    "grafel-graph": {
+      "command": "C:\\Users\\Usman\\AppData\\Local\\Programs\\Python\\Python312\\Scripts\\graphify-mcp.EXE",
+      "args": [
+        "--graph",
+        "C:\\Users\\Usman\\Documents\\GitHub\\DOBS-mysql-updates\\graphify-out\\graph.json"
+      ]
+    }
+  }
+}

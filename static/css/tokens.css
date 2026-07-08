@@ -1,0 +1,143 @@
+/*
+ * DOBS Design Tokens
+ *
+ * Single source of truth for color/spacing/typography/shadow/radius/motion,
+ * replacing four previously-competing, hand-duplicated color schemes
+ * (per-dashboard inline :root, dashboard-common.css's :root, dobs-theme.css,
+ * styles.css). Brand purple (#602273) is preserved - it's already the
+ * recognized DOBS color in dashboards and emails - and built into a proper
+ * scale via color-mix() rather than hand-picked hex tints.
+ */
+:root {
+  /* ---- Brand ---- */
+  --primary: #602273;
+  --primary-dark: #450f5c;
+  --primary-50: color-mix(in srgb, var(--primary) 6%, white);
+  --primary-100: color-mix(in srgb, var(--primary) 14%, white);
+  --primary-200: color-mix(in srgb, var(--primary) 28%, white);
+  --primary-300: color-mix(in srgb, var(--primary) 45%, white);
+  --primary-400: color-mix(in srgb, var(--primary) 70%, white);
+  --primary-500: var(--primary);
+  --primary-600: color-mix(in srgb, var(--primary) 85%, black);
+  --primary-700: var(--primary-dark);
+  --primary-contrast: #ffffff;
+
+  /* ---- Semantic (deliberately distinct hues from the brand accent) ---- */
+  --success: #1f9d55;
+  --success-soft: color-mix(in srgb, var(--success) 14%, white);
+  --warning: #b7791f;
+  --warning-soft: color-mix(in srgb, var(--warning) 16%, white);
+  --danger: #d64545;
+  --danger-soft: color-mix(in srgb, var(--danger) 14%, white);
+  --info: #2b6cb0;
+  --info-soft: color-mix(in srgb, var(--info) 14%, white);
+
+  /* ---- Neutrals: warm, with a faint purple undertone for cohesion ---- */
+  --gray-50: #f7f5f8;
+  --gray-100: #efebf1;
+  --gray-200: #ddd6e0;
+  --gray-300: #c2b8c7;
+  --gray-400: #9c8ea3;
+  --gray-500: #786b7f;
+  --gray-600: #5c4f63;
+  --gray-700: #453a4b;
+  --gray-800: #2f2733;
+  --gray-900: #1c1620;
+
+  /* ---- Surfaces ---- */
+  --bg-page: var(--gray-50);
+  --bg-surface: #ffffff;
+  --bg-sunken: var(--gray-100);
+  --border-color: var(--gray-200);
+  --text-primary: var(--gray-900);
+  --text-secondary: var(--gray-600);
+  --text-on-primary: var(--primary-contrast);
+
+  /* ---- Typography ---- */
+  --font-family: -apple-system, "Segoe UI", Roboto, Tahoma, Arial, sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-4xl: 2.25rem;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* ---- Spacing (4px base unit) ---- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* ---- Radius ---- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+
+  /* ---- Shadows (purple-tinted, not pure black, for cohesion) ---- */
+  --shadow-sm: 0 1px 2px rgba(96, 34, 115, 0.08);
+  --shadow-md: 0 4px 12px rgba(96, 34, 115, 0.12);
+  --shadow-lg: 0 12px 32px rgba(96, 34, 115, 0.18);
+  --shadow-focus: 0 0 0 3px rgba(96, 34, 115, 0.25);
+
+  /* ---- Motion ---- */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 450ms;
+  --duration-slower: 700ms;
+
+  /* ---- Z-index scale ---- */
+  --z-navbar: 100;
+  --z-sidebar: 200;
+  --z-topbar: 150;
+  --z-modal-backdrop: 900;
+  --z-modal: 1000;
+  --z-toast: 1100;
+
+  /* ---- App shell: dark sidebar + light topbar ----
+   * A distinct dark neutral scale (not derived from --gray-*, which is
+   * warm/light-purpose) so the sidebar reads as a deliberate "control panel"
+   * surface rather than an inverted light theme.
+   */
+  --sidebar-width: 264px;
+  --sidebar-width-collapsed: 76px;
+  --topbar-height: 68px;
+
+  --sidebar-bg: #1c1024;
+  --sidebar-bg-elevated: #241531;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-text: rgba(255, 255, 255, 0.72);
+  --sidebar-text-muted: rgba(255, 255, 255, 0.44);
+  --sidebar-text-strong: #ffffff;
+  --sidebar-item-hover-bg: rgba(255, 255, 255, 0.06);
+  --sidebar-item-active-bg: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  --sidebar-item-active-text: #ffffff;
+  --sidebar-scrollbar: rgba(255, 255, 255, 0.15);
+
+  --topbar-bg: rgba(255, 255, 255, 0.85);
+  --topbar-border: var(--border-color);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0.01ms;
+    --duration-base: 0.01ms;
+    --duration-slow: 0.01ms;
+    --duration-slower: 0.01ms;
+  }
+}

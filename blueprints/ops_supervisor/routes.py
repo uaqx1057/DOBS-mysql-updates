@@ -9,6 +9,7 @@ from utils.email_utils import send_password_change_email
 from sqlalchemy import func, or_
 from flask_wtf.csrf import validate_csrf, CSRFError
 from forms.common import CSRFOnlyForm, ChangePasswordForm, OpsSupervisorApproveForm
+from services import onboarding_workflow, offboarding_workflow
 
 ops_supervisor_bp = Blueprint("ops_supervisor", __name__)
 
@@ -86,9 +87,6 @@ def dashboard_ops_supervisor():
     total_drivers = len(onboarding_drivers)
     total_offboardings = len(offboarding_requests)
 
-    lang = session.get("lang", "en")
-    template = "rtl_dashboard_ops_supervisor.html" if lang == "ar" else "dashboard_ops_supervisor.html"
-
     # Prepare all businesses + only active & unassigned IDs
     businesses = Business.query.order_by(Business.name).all()
     all_businesses = []
@@ -120,7 +118,7 @@ def dashboard_ops_supervisor():
         })
 
     return render_template(
-        template,
+        "dashboard_ops_supervisor.html",
         total_drivers=total_drivers,
         total_offboardings=total_offboardings,
         onboarding_drivers=onboarding_drivers,
@@ -266,7 +264,7 @@ def approve_driver(driver_id):
         driver.issued_device_id = issued_device_id
         driver.mobile_issued = mobile_issued
         driver.ops_supervisor_approved_at = datetime.utcnow()
-        driver.onboarding_stage = "Fleet Manager"
+        onboarding_workflow.advance(driver, from_stage="Ops Supervisor")
 
         db.session.commit()
         current_app.logger.info(
@@ -485,12 +483,25 @@ def api_clear_offboarding(offboarding_id):
         )
         combined_note = f"{base_note}\n{assets_summary}".strip() if base_note else assets_summary
 
+        penalty_amount_raw = data.get("penalty_amount")
+        try:
+            penalty_amount = float(penalty_amount_raw) if penalty_amount_raw not in (None, "") else None
+        except (TypeError, ValueError):
+            penalty_amount = None
+        penalty_note = (data.get("penalty_note") or "").strip() or None
+
         cleared_at = datetime.utcnow()
+        next_status = (
+            offboarding_workflow.next_status_after_ops_supervisor(record.driver)
+            if record.driver else "Fleet"
+        )
         update_values = {
             "ops_supervisor_cleared": True,
             "ops_supervisor_cleared_at": cleared_at,
             "ops_supervisor_note": combined_note,
-            "status": "Fleet",
+            "ops_supervisor_penalty_amount": penalty_amount,
+            "ops_supervisor_penalty_note": penalty_note,
+            "status": next_status,
         }
 
         if record.driver:
@@ -516,13 +527,17 @@ def api_clear_offboarding(offboarding_id):
         Offboarding.query.filter_by(id=record.id).update(update_values, synchronize_session=False)
         db.session.commit()
 
-        # Notify Fleet Managers
+        # Notify whichever team is next - Fleet only applies if the driver
+        # has ever had a vehicle assignment; everyone else skips straight to Finance.
         try:
-            fleet_managers = User.query.filter_by(role="FleetManager").all()
-            emails = [u.email for u in fleet_managers if u.email]
+            next_role = "FleetManager" if next_status == "Fleet" else "FinanceManager"
+            next_team_label = "Fleet Manager" if next_status == "Fleet" else "Finance Manager"
+            next_team_label_ar = "مديرو الأسطول" if next_status == "Fleet" else "المالية"
+            next_users = User.query.filter_by(role=next_role).all()
+            emails = [u.email for u in next_users if u.email]
             if emails and record.driver:
                 msg = Message(
-                    subject=f"Driver Offboarding Ready for Fleet Clearance | السائق جاهز لإجراءات الأسطول: {driver_name}",
+                    subject=f"Driver Offboarding Ready for {next_team_label} Clearance | جاهز لإجراءات {next_team_label_ar}: {driver_name}",
                     recipients=emails
                 )
                 msg.html = f"""
@@ -532,9 +547,9 @@ def api_clear_offboarding(offboarding_id):
 
                         <!-- English -->
                         <div style="text-align: left;">
-                            <h2 style="color: #713183;">Driver Offboarding Ready for Fleet Clearance</h2>
-                            <p>Dear Fleet Manager,</p>
-                            <p>Driver <strong>{driver_name}</strong> has been cleared by the Ops Supervisor and is ready for Fleet clearance processing.</p>
+                            <h2 style="color: #713183;">Driver Offboarding Ready for {next_team_label} Clearance</h2>
+                            <p>Dear {next_team_label},</p>
+                            <p>Driver <strong>{driver_name}</strong> has been cleared by the Ops Supervisor and is ready for {next_team_label} processing.</p>
                             <p>Please log in to your dashboard to continue processing: <a href="https://dobs.dobs.cloud/login" target="_blank">https://dobs.dobs.cloud/login</a></p>
                         </div>
 
@@ -542,9 +557,9 @@ def api_clear_offboarding(offboarding_id):
 
                         <!-- Arabic -->
                         <div dir="rtl" lang="ar" style="text-align: right; font-family: Tahoma, sans-serif;">
-                            <h2 style="color: #713183;">السائق جاهز لإجراءات الأسطول</h2>
-                            <p>السادة مديرو الأسطول،</p>
-                            <p>تمت الموافقة على السائق <strong>{driver_name}</strong> من قبل مشرف العمليات وهو جاهز لإجراءات مرحلة الأسطول.</p>
+                            <h2 style="color: #713183;">السائق جاهز لإجراءات {next_team_label_ar}</h2>
+                            <p>السادة {next_team_label_ar}،</p>
+                            <p>تمت الموافقة على السائق <strong>{driver_name}</strong> من قبل مشرف العمليات وهو جاهز للمرحلة التالية.</p>
                             <p>يرجى تسجيل الدخول إلى لوحة القيادة لمتابعة الإجراءات: <a href="https://dobs.dobs.cloud/login" target="_blank">https://dobs.dobs.cloud/login</a></p>
                         </div>
 
@@ -555,7 +570,7 @@ def api_clear_offboarding(offboarding_id):
                 mail.send(msg)
 
         except Exception as e:
-            current_app.logger.warning("[OPS_SUPERVISOR] Fleet email error: %s", e)
+            current_app.logger.warning("[OPS_SUPERVISOR] Next-stage email error: %s", e)
 
         return {
             "success": True,

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tr('Permissions', 'الصلاحيات') }} — {{ role.name }} — DOBS{% endblock %}
+{% block navbar_title %}{{ tr('Permissions', 'الصلاحيات') }} — {{ role.name }}{% endblock %}
+{% block navbar_actions %}
+<a href="{{ url_for('admin.roles') }}" class="nav-btn">&larr; {{ tr('Back to Roles', 'العودة إلى الأدوار') }}</a>
+{% endblock %}
+
+{% block content %}
+<div class="page-header reveal">
+  <h1 class="page-title">{{ role.name }}</h1>
+  <p class="page-subtitle">{{ tr('Check every action this role should be able to perform by default. Individual users can still be granted or denied any of these separately from the Access page on their profile.', 'حدد كل إجراء يمكن لهذا الدور تنفيذه افتراضياً. لا يزال بالإمكان منح أو سحب أي منها لمستخدم بعينه من صفحة الصلاحيات الخاصة به.') }}</p>
+</div>
+
+<div class="card reveal">
+  <form method="post" action="{{ url_for('admin.save_role_permissions', role_id=role.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    {% for category, perms in grouped_permissions.items() %}
+    <div class="mb-4">
+      <h4 class="fs-6 fw-semibold text-secondary text-uppercase">{{ category | capitalize }}</h4>
+      {% for perm in perms %}
+      <label class="d-flex align-items-center gap-2 py-2 border-bottom">
+        <input type="checkbox" class="form-check-input" name="permission_codes" value="{{ perm.code }}" {{ 'checked' if perm.code in granted_codes else '' }}>
+        <span>
+          <code class="small">{{ perm.code }}</code>
+          {% if perm.description %}<br><span class="text-secondary small">{{ perm.description }}</span>{% endif %}
+        </span>
+      </label>
+      {% endfor %}
+    </div>
+    {% endfor %}
+
+    <button class="btn btn-primary mt-2" type="submit">{{ tr('Save Permissions', 'حفظ الصلاحيات') }}</button>
+  </form>
+</div>
+{% endblock %}

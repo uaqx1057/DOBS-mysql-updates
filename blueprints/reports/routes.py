@@ -17,6 +17,7 @@ from io import StringIO
 from flask import Response
 from forms.common import ReportsFilterForm
 from sqlalchemy import or_
+from utils.pdf import register_unicode_font, safe_pdf_text
 
 
 reports_bp = Blueprint("reports_bp", __name__, template_folder="templates")
@@ -73,40 +74,12 @@ def _format_platform_assignments(driver):
     return ""
 
 
-def _register_unicode_font():
-    """Try to register a Unicode-capable font for ReportLab.
 
-    Returns the font name if registered, else None.
-    """
-
-    candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/ttf/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
-    ]
-
-    for path in candidates:
-        if os.path.isfile(path):
-            try:
-                font_name = "UnicodeSans"
-                if font_name not in pdfmetrics.getRegisteredFontNames():
-                    pdfmetrics.registerFont(TTFont(font_name, path))
-                return font_name
-            except Exception:
-                continue
-
-    return None
-
-
-def _safe_pdf_text(value, allow_unicode: bool):
-    if value is None:
-        return ""
-    text = str(value)
-    if allow_unicode:
-        return text
-    return text.encode("latin-1", "replace").decode("latin-1")
+# _register_unicode_font/_safe_pdf_text moved to utils/pdf.py (shared with
+# services/contracts.py); kept as local aliases so existing call sites below
+# don't need to change.
+_register_unicode_font = register_unicode_font
+_safe_pdf_text = safe_pdf_text
 
 # ------------------------
 # Filter function

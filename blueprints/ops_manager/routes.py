@@ -3,7 +3,7 @@ from email.mime.text import MIMEText
 import smtplib
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask_login import login_required, current_user
-from models import Driver, Offboarding, User
+from models import Driver, DriverType, Offboarding, User
 from extensions import db, mail, limiter
 from flask_mail import Message
 from datetime import datetime
@@ -16,9 +16,10 @@ from forms.common import (
     OpsManagerRejectForm,
     OpsManagerOffboardingForm,
 )
-from utils.email_utils import send_password_change_email 
+from utils.email_utils import send_password_change_email
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask import jsonify
+from services import onboarding_workflow, offboarding_workflow
 
 
  
@@ -45,9 +46,6 @@ def dashboard_ops():
     if current_user.role != "OpsManager":
         flash("Access denied. Ops Manager role required.", "danger")
         return redirect(url_for("auth.login"))
-
-    from flask import session
-    lang = session.get("lang", "en")
 
     # --- Fetch data ---
     drivers = Driver.query.filter_by(onboarding_stage="Ops Manager").all()
@@ -99,17 +97,20 @@ def dashboard_ops():
             "current_stage": current_stage
         })
 
-    # --- Select template based on language ---
-    template = "rtl_dashboard_ops.html" if lang == "ar" else "dashboard_ops.html"
+    driver_types = DriverType.query.filter(DriverType.deleted_at.is_(None)).order_by(DriverType.name).all()
 
     return render_template(
-        template,
+        "dashboard_ops.html",
         drivers=drivers,
         rejected_drivers=rejected,
         offboarding_drivers=offboarding_drivers,
         fully_onboarded_drivers=fully_onboarded_drivers,
         count_onboarding_ops=len(drivers),
-        count_offboarding_requested=len(offboarding_drivers)
+        count_offboarding_requested=len(offboarding_drivers),
+        count_onboarded=len(fully_onboarded_drivers),
+        count_rejected=len(rejected),
+        driver_types=driver_types,
+        offboarding_stage_sequence=["Requested", "OpsSupervisor", "Fleet", "Finance", "HR", "Completed"],
     )
 
 # -------------------------
@@ -142,6 +143,11 @@ def approve_driver(driver_id):
         flash(f"Driver is not in Ops Manager stage (current: {driver.onboarding_stage}).", "warning")
         return redirect(url_for("ops_manager.dashboard_ops"))
 
+    driver_type = DriverType.query.get(form.driver_type_id.data)
+    if not driver_type:
+        flash("Please select a valid driver type.", "danger")
+        return redirect(url_for("ops_manager.dashboard_ops"))
+
     # Optional: allow ops manager to add a short note (not required)
     ops_note = form.ops_note.data.strip() if form.ops_note.data else ""
 
@@ -154,8 +160,14 @@ def approve_driver(driver_id):
         if not driver.ops_manager_approved_at:
             driver.ops_manager_approved_at = datetime.utcnow()
 
-    # Move to HR stage
-    driver.onboarding_stage = "HR"
+    # Driver type (Sponsor/Freelancer/Manpower/...) decides the rest of the
+    # onboarding sequence - see services/onboarding_workflow.py. The vehicle
+    # flag only matters for types whose sequence has a conditional Fleet
+    # Manager stage (skip_condition_field="will_provide_vehicle").
+    driver.driver_type_id = driver_type.id
+    driver.will_provide_vehicle = form.will_provide_vehicle.data == "true"
+
+    onboarding_workflow.advance(driver, from_stage="Ops Manager")
 
     # Save
     try:
@@ -376,7 +388,13 @@ def change_password():
     return redirect(url_for("ops_manager.dashboard_ops"))
 
 # -------------------------
-# Request Offboarding (Ops Manager)
+# Request / Approve Offboarding (Ops Manager)
+#
+# One route serves two cases: if an employee (e.g. Ops Coordinator) already
+# filed a request via services.offboarding_workflow.request_offboarding(),
+# this approves it and sends it to Ops Supervisor. If no request exists yet,
+# Ops Manager's click both creates and approves it in one step - Ops Manager
+# doesn't need to approve their own initiation.
 # -------------------------
 @ops_manager_bp.route("/request_offboarding/<int:driver_id>", methods=["POST"])
 @login_required
@@ -396,21 +414,16 @@ def request_offboarding(driver_id):
         flash("Only completed drivers can be offboarded.", "warning")
         return redirect(url_for("ops_manager.dashboard_ops"))
 
-    # 🔒 Prevent duplicate requests
-    existing = Offboarding.query.filter_by(driver_id=driver.id, status="Requested").first()
-    if existing:
-        flash(f"Offboarding already requested for {driver.name}.", "info")
+    existing = offboarding_workflow.get_open_offboarding(driver)
+    if existing and existing.status != "Requested":
+        flash(f"Offboarding already in progress for {driver.name}.", "info")
         return redirect(url_for("ops_manager.dashboard_ops"))
 
-    # ✅ Create a new record
-    offboarding = Offboarding(
-        driver_id=driver.id,
-        requested_by_id=current_user.id,
-        requested_at=datetime.utcnow(),
-        status="OpsSupervisor"  # 🔑 mark next stage clearly
-    )
-    db.session.add(offboarding)
-    db.session.commit()
+    if existing:
+        offboarding = offboarding_workflow.approve_by_ops_manager(existing)
+    else:
+        offboarding = offboarding_workflow.request_offboarding(driver, current_user)
+        offboarding = offboarding_workflow.approve_by_ops_manager(offboarding)
 
     # ✅ Notify Ops Supervisors via email
     try:
@@ -496,121 +509,6 @@ def request_offboarding(driver_id):
 
     flash(f"Offboarding requested for {driver.name}.", "success")
     return redirect(url_for("ops_manager.dashboard_ops"))
-
-@ops_manager_bp.route("/api/request_offboarding/<int:driver_id>", methods=["POST"])
-@login_required
-def api_request_offboarding(driver_id):
-    if current_user.role != "OpsManager":
-        return {"success": False, "message": "Access denied"}, 403
-
-    if not _validate_csrf():
-        return {"success": False, "message": "Invalid CSRF token"}, 400
-
-    driver = Driver.query.get_or_404(driver_id)
-    if driver.onboarding_stage != "Completed":
-        return {"success": False, "message": "Only completed drivers can be offboarded."}, 400
-
-    existing = Offboarding.query.filter_by(driver_id=driver.id, status="Requested").first()
-    if existing:
-        return {"success": False, "message": "Offboarding already requested."}, 200
-
-    offboarding = Offboarding(
-        driver_id=driver.id,
-        requested_by_id=current_user.id,
-        status="Requested"
-    )
-    db.session.add(offboarding)
-    db.session.commit()
-
-    # notify supervisors (same as before)
-    try:
-        supervisors = User.query.filter_by(role="Ops Supervisor").all()
-        emails = [s.email for s in supervisors if s.email]
-        if emails:
-            driver_iqama = driver.iqaama_number or "N/A"
-            driver_city = driver.city or "N/A"
-            driver_mobile = driver.absher_number or "N/A"
-        
-            msg = Message(
-                subject=f"Offboarding Requested: {driver.name} | تم طلب إنهاء خدمات السائق",
-                recipients=emails
-            )
-        
-            msg.html = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; color: #333; background-color: #f8f9fa; padding: 20px;">
-                <div style="max-width: 600px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.1);">
-        
-                    <!-- English LTR -->
-                    <div style="text-align: left;">
-                        <h2 style="color: #004aad;">Driver Onboarding System</h2>
-                        <p>Dear Ops Supervisor,</p>
-                        <p>Ops Manager <strong>{current_user.name or current_user.username}</strong> has requested offboarding for the following driver:</p>
-                        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Driver Name</strong></td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver.name}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Iqama Number</strong></td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver_iqama}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>City</strong></td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver_city}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Mobile</strong></td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver_mobile}</td>
-                            </tr>
-                        </table>
-                        <p>Please log in to the dashboard to start the clearance process.https://dobs.dobs.cloud/login</p>
-                    </div>
-        
-                    <hr style="margin: 30px 0;">
-        
-                    <!-- Arabic RTL -->
-                    <div dir="rtl" lang="ar" style="text-align: right; font-family: Tahoma, sans-serif;">
-                        <h2 style="color: #004aad;">نظام إدخال السائقين</h2>
-                        <p>عزيزي مشرف العمليات،</p>
-                        <p>قام مدير العمليات <strong>{current_user.name or current_user.username}</strong> بطلب إنهاء خدمات السائق التالي:</p>
-                        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;">اسم السائق</td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver.name}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;">رقم الإقامة</td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver_iqama}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;">المدينة</td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver_city}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;">الهاتف</td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver_mobile}</td>
-                            </tr>
-                        </table>
-                        <p>يرجى تسجيل الدخول إلى لوحة التحكم لبدء عملية إنهاء الخدمة.https://dobs.dobs.cloud/login</p>
-                    </div>
-        
-                </div>
-            </body>
-            </html>
-            """
-        
-            mail.send(msg)
-    except Exception as e:
-        print("[EMAIL ERROR]", e)
-
-    return {
-        "success": True,
-        "driver_id": driver.id,
-        "requested_at": offboarding.requested_at.strftime("%Y-%m-%d"),
-    }
-
-
 
 @ops_manager_bp.route("/reject_offboarding/<int:driver_id>", methods=["POST"])
 @login_required

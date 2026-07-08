@@ -1,0 +1,130 @@
+{% set is_ar = (current_lang or 'en') == 'ar' %}
+<!DOCTYPE html>
+<html lang="{{ 'ar' if is_ar else 'en' }}" dir="{{ 'rtl' if is_ar else 'ltr' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="DOBS portal for driver registration and team login.">
+    <title>{{ 'DOBS | Driver Portal' if not is_ar else 'DOBS | بوابة السائقين' }}</title>
+    <link rel="icon" type="image/webp" href="{{ url_for('static', filename='Home_09_Onepage_files/logo1.webp') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dobs-theme.css') }}">
+</head>
+<body class="dobs-theme dobs-theme--landing-light">
+    <div class="dobs-orb dobs-orb--gold"></div>
+    <div class="dobs-orb dobs-orb--violet"></div>
+    <div class="dobs-orb dobs-orb--pink"></div>
+
+    <div class="dobs-page-wrap">
+        <div class="dobs-shell">
+            <section class="dobs-panel-grid">
+                <aside class="dobs-brand-panel">
+                    <div class="dobs-brand-inner">
+                        <div class="dobs-topbar dobs-topbar--landing">
+                            <nav class="dobs-nav">
+                                <a class="dobs-nav-link" href="/set_language/{{ 'en' if is_ar else 'ar' }}?next=/">{{ 'English' if is_ar else 'العربية' }}</a>
+                                <span class="dobs-badge"><span class="dobs-badge-dot"></span>{{ 'Driver onboarding' if not is_ar else 'انضمام السائقين' }}</span>
+                            </nav>
+                        </div>
+
+                        <img class="dobs-logo" src="{{ url_for('static', filename='Home_09_Onepage_files/logo1.webp') }}" alt="DOBS logo">
+                        <h1 class="dobs-headline">{{ 'Fast, clear onboarding for every new driver.' if not is_ar else 'انضمام سريع وواضح لكل سائق جديد.' }}</h1>
+                        <p class="dobs-copy">{{ 'Start a new application or move directly to team access from one simple portal.' if not is_ar else 'ابدأ طلباً جديداً أو انتقل مباشرة إلى دخول الفريق من بوابة واحدة بسيطة.' }}</p>
+
+                        <div class="dobs-feature-list">
+                            <div class="dobs-feature-item">
+                                <div class="dobs-feature-icon">01</div>
+                                <div class="dobs-feature-copy">
+                                    <strong>{{ 'Simple registration' if not is_ar else 'تسجيل بسيط' }}</strong>
+                                    <span>{{ 'Core applicant details are collected in one clear flow.' if not is_ar else 'يتم جمع بيانات المتقدم الأساسية في مسار واحد واضح.' }}</span>
+                                </div>
+                            </div>
+                            <div class="dobs-feature-item">
+                                <div class="dobs-feature-icon">02</div>
+                                <div class="dobs-feature-copy">
+                                    <strong>{{ 'Direct team access' if not is_ar else 'دخول مباشر للفريق' }}</strong>
+                                    <span>{{ 'Registration and staff login stay easy to reach from the same page.' if not is_ar else 'التسجيل ودخول الموظفين يبقيان سهلي الوصول من نفس الصفحة.' }}</span>
+                                </div>
+                            </div>
+                            <div class="dobs-feature-item">
+                                <div class="dobs-feature-icon">03</div>
+                                <div class="dobs-feature-copy">
+                                    <strong>{{ 'Works on mobile' if not is_ar else 'يعمل على الجوال' }}</strong>
+                                    <span>{{ 'Primary actions stay readable on smaller screens.' if not is_ar else 'الإجراءات الأساسية تبقى واضحة على الشاشات الصغيرة.' }}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="dobs-stat-grid">
+                            <div class="dobs-stat-card">
+                                <span class="dobs-stat-value">1</span>
+                                <span class="dobs-stat-label">{{ 'application form' if not is_ar else 'نموذج طلب' }}</span>
+                            </div>
+                            <div class="dobs-stat-card">
+                                <span class="dobs-stat-value">2</span>
+                                <span class="dobs-stat-label">{{ 'clear paths' if not is_ar else 'مسارات واضحة' }}</span>
+                            </div>
+                            <div class="dobs-stat-card">
+                                <span class="dobs-stat-value">24/7</span>
+                                <span class="dobs-stat-label">{{ 'available online' if not is_ar else 'متاح دائماً' }}</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </aside>
+
+                <main class="dobs-content-panel">
+                    <div class="dobs-main-copy">
+                        <span class="dobs-eyebrow">{{ 'Welcome to DOBS' if not is_ar else 'مرحباً بك في DOBS' }}</span>
+                        <h2 class="dobs-section-title">{{ 'Choose how you want to continue.' if not is_ar else 'اختر كيف تريد المتابعة.' }}</h2>
+                        <p class="dobs-section-copy">{{ 'Open a driver application or sign in if you already use the system.' if not is_ar else 'افتح طلب سائق أو سجل الدخول إذا كنت تستخدم النظام بالفعل.' }}</p>
+
+                        <div class="dobs-cta-grid">
+                            <article class="dobs-cta-card dobs-cta-card--accent">
+                                <span class="dobs-card-kicker">{{ 'Driver registration' if not is_ar else 'تسجيل السائقين' }}</span>
+                                <h3 class="dobs-card-title">{{ 'Apply as a driver' if not is_ar else 'التقدم كسائق' }}</h3>
+                                <p class="dobs-card-copy">{{ 'Fill in your basic details and upload the required documents.' if not is_ar else 'أدخل بياناتك الأساسية وارفع المستندات المطلوبة.' }}</p>
+                                <div class="dobs-pill-row">
+                                    <span class="dobs-pill">{{ 'Iqama' if not is_ar else 'الإقامة' }}</span>
+                                    <span class="dobs-pill">{{ 'Documents' if not is_ar else 'المستندات' }}</span>
+                                    <span class="dobs-pill">{{ 'Contact' if not is_ar else 'التواصل' }}</span>
+                                </div>
+                                <div class="dobs-button-row">
+                                    <a class="dobs-button" href="{{ url_for('public.register') }}">{{ 'Start application' if not is_ar else 'ابدأ الطلب' }}</a>
+                                </div>
+                            </article>
+
+                            <article class="dobs-cta-card">
+                                <span class="dobs-card-kicker">{{ 'Team access' if not is_ar else 'دخول الفريق' }}</span>
+                                <h3 class="dobs-card-title">{{ 'Sign in to DOBS' if not is_ar else 'تسجيل الدخول إلى DOBS' }}</h3>
+                                <p class="dobs-card-copy">{{ 'Use this entry point for HR, operations, fleet, and finance access.' if not is_ar else 'استخدم نقطة الدخول هذه للموارد البشرية والعمليات والأسطول والمالية.' }}</p>
+                                <ul class="dobs-checklist">
+                                    <li>{{ 'Secure sign-in' if not is_ar else 'دخول آمن' }}</li>
+                                    <li>{{ 'OTP when required' if not is_ar else 'رمز تحقق عند الحاجة' }}</li>
+                                </ul>
+                                <div class="dobs-button-row">
+                                    <a class="dobs-button-outline" href="{{ url_for('auth.login') }}">{{ 'Open login' if not is_ar else 'فتح تسجيل الدخول' }}</a>
+                                </div>
+                            </article>
+                        </div>
+
+                        <div class="dobs-kpi-row">
+                            <div class="dobs-kpi-card">
+                                <strong>{{ 'Simple' if not is_ar else 'بسيط' }}</strong>
+                                <span>{{ 'Clear next steps from the start.' if not is_ar else 'خطوات واضحة منذ البداية.' }}</span>
+                            </div>
+                            <div class="dobs-kpi-card">
+                                <strong>{{ 'Fast' if not is_ar else 'سريع' }}</strong>
+                                <span>{{ 'Main actions stay easy to find.' if not is_ar else 'الإجراءات الرئيسية سهلة الوصول.' }}</span>
+                            </div>
+                            <div class="dobs-kpi-card">
+                                <strong>{{ 'Responsive' if not is_ar else 'متجاوب' }}</strong>
+                                <span>{{ 'Comfortable on mobile and desktop.' if not is_ar else 'مريح على الجوال وسطح المكتب.' }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+            </section>
+        </div>
+    </div>
+</body>
+</html>

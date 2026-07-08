@@ -13,6 +13,7 @@ from utils.email_utils import send_password_change_email
 import os
 from flask_wtf.csrf import validate_csrf, CSRFError
 from forms.common import CSRFOnlyForm, ChangePasswordForm, FleetAssignForm, FleetOffboardingForm
+from services import onboarding_workflow
 
 fleet_bp = Blueprint("fleet", __name__)
 
@@ -159,11 +160,8 @@ def dashboard_fleet():
         .all()
     )
 
-    lang = session.get("lang", "en")
-    template = "rtl_dashboard_fleet.html" if lang == "ar" else "dashboard_fleet.html"
-
     return render_template(
-        template,
+        "dashboard_fleet.html",
         onboarding_drivers=onboarding_drivers,
         offboarding_requests=offboarding_requests,
         total_drivers=total_drivers,
@@ -265,19 +263,19 @@ def assign_vehicle(driver_id):
 
         vehicle.status = "assigned"
 
-        # Determine next stage and recipients
-        if not driver.qiwa_contract_created:
-            next_stage = "HR Final"
-            recipients = [
-                u.email for u in User.query.filter(User.role.in_(["HR", "HRManager"])).all() if u.email
-            ]
-        else:
-            next_stage = "Finance"
+        # Next stage is driver-type-driven (see services/onboarding_workflow.py):
+        # Sponsor sequences continue to Finance; Freelancer/Manpower sequences
+        # skip straight to HR Final since they have no Finance stage.
+        next_stage = onboarding_workflow.advance(driver, from_stage="Fleet Manager")
+        if next_stage == "Finance":
             recipients = [
                 u.email for u in User.query.filter(User.role.in_(["Finance", "FinanceManager"])).all() if u.email
             ]
+        else:
+            recipients = [
+                u.email for u in User.query.filter(User.role.in_(["HR", "HRManager"])).all() if u.email
+            ]
 
-        driver.onboarding_stage = next_stage
         db.session.commit()
 
         # Send notification email; swallow network failures so assignment succeeds even if email fails.
@@ -432,187 +430,100 @@ def offboarding_action(offboarding_id):
             "tamm_revoked_at": tamm_revoked_at,
         }
 
-        # --- Determine next stage ---
-        if data.get("finalize") and data.get("finance_cleared"):
-            # Finance has cleared → Completed
-            status = "Finance"
-            Offboarding.query.filter_by(id=record.id).update(
-                {**base_updates, "status": status},
-                synchronize_session=False,
+        # Fleet always hands off to Finance next - Finance does the
+        # calculations, then HR gives the final verdict. There is no
+        # shortcut from Fleet straight to "fully offboarded."
+        Offboarding.query.filter_by(id=record.id).update(
+            {**base_updates, "status": "Finance"},
+            synchronize_session=False,
+        )
+        db.session.commit()
+
+        # Notify Finance
+        finance_users = User.query.filter(User.role.in_(["FinanceManager", "Finance"])).all()
+        emails = [f.email for f in finance_users if f.email]
+        if emails and record.driver:
+            msg = Message(
+                subject=f"Driver Sent to Finance Manager | تحويل السائق إلى المالية: {driver_name}",
+                recipients=emails
             )
-            db.session.commit()
 
-            # Notify HR/Admin
-            recipients = [u.email for u in User.query.filter(User.role.in_(["HR", "Admin"])).all() if u.email]
-            if recipients and record.driver:
-                msg = Message(
-                    subject=f"Driver Fully Offboarded | اكتمال خروج السائق: {driver_name}",
-                    recipients=recipients
-                )
+            msg.html = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; color: #333; background-color: #f8f9fa; padding: 20px;">
+                <div style="max-width: 600px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.1);">
 
-                msg.html = f"""
-                <html>
-                <body style="font-family: Arial, sans-serif; color: #333; background-color: #f8f9fa; padding: 20px;">
-                    <div style="max-width: 600px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.1);">
-
-                        <!-- English -->
-                        <div style="text-align: left;">
-                            <h2 style="color: #713183;">Driver Fully Offboarded</h2>
-                            <p>Dear HR / Admin Team,</p>
-                            <p>Driver <strong>{driver_name}</strong> (Iqama: <strong>{record.driver.iqaama_number or "N/A"}</strong>) has been fully offboarded.</p>
-                            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                                <tr>
-                                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Offboarding Completed At</strong></td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{datetime.utcnow().strftime('%Y-%m-%d %H:%M')}</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>TAMM Revoked At</strong></td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{tamm_revoked_at.strftime('%Y-%m-%d %H:%M') if tamm_revoked_at else 'N/A'}</td>
-                                </tr>
-                            </table>
-                            <p>Please update your records accordingly.</p>
-                            <p>Login here to review: <a href="https://dobs.dobs.cloud/login</" target="_blank">HR Dashboard</a></p>
-                        </div>
-
-                        <hr style="margin: 30px 0;">
-
-                        <!-- Arabic -->
-                        <div dir="rtl" lang="ar" style="text-align: right; font-family: Tahoma, sans-serif;">
-                            <h2 style="color: #713183;">اكتمال خروج السائق</h2>
-                            <p>السادة فريق الموارد البشرية / الإدارة،</p>
-                            <p>تم إتمام خروج السائق <strong>{driver_name}</strong> (رقم الإقامة: <strong>{record.driver.iqaama_number or "N/A"}</strong>).</p>
-                            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                                <tr>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">تاريخ إتمام الخروج</td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{datetime.utcnow().strftime('%Y-%m-%d %H:%M')}</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">تاريخ إلغاء صلاحية TAMM</td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{tamm_revoked_at.strftime('%Y-%m-%d %H:%M') if tamm_revoked_at else 'N/A'}</td>
-                                </tr>
-                            </table>
-                            <p>يرجى تحديث سجلاتكم حسب ذلك.</p>
-                            <p>Login هنا لمراجعة: <a href="https://dobs.dobs.cloud/login</r" target="_blank">لوحة الموارد البشرية</a></p>
-                        </div>
-
-                        <hr style="margin: 30px 0;">
-
-                        <p style="text-align:center;">Regards / مع التحية,<br>Fleet Team / فريق الأسطول</p>
-
+                    <!-- English -->
+                    <div style="text-align: left;">
+                        <h2 style="color: #713183;">Driver Sent to Finance Manager</h2>
+                        <p>Dear Finance Team,</p>
+                        <p>Driver <strong>{driver_name}</strong> (Iqama: <strong>{record.driver.iqaama_number or "N/A"}</strong>) has been cleared by the Fleet Manager.</p>
+                        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Fleet Damage Report</strong></td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_report or "N/A"}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Damage Cost</strong></td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_cost or 0} SAR</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>TAMM Revoked</strong></td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">{"Yes" if tamm_revoked else "No"}</td>
+                            </tr>
+                        </table>
+                        <p>Please proceed with the settlement.</p>
+                        <p>Login here to review: <a href="https://dobs.dobs.cloud/login</" target="_blank">Finance Dashboard</a></p>
                     </div>
-                </body>
-                </html>
-                """
 
-                try:
-                    mail.send(msg)
-                except Exception as mail_err:
-                    current_app.logger.error(f"[FLEET] HR/Admin notification email failed: {mail_err}")
+                    <hr style="margin: 30px 0;">
 
-
-
-            return jsonify({
-                "success": True,
-                "message": f"Driver {driver_name} fully offboarded.",
-                "released_assignment_count": released_assignment_count,
-            })
-
-        else:
-            # Send to FinanceManager
-            status = "Finance"
-            Offboarding.query.filter_by(id=record.id).update(
-                {**base_updates, "status": status},
-                synchronize_session=False,
-            )
-            db.session.commit()
-
-            # Notify Finance
-            finance_users = User.query.filter(User.role.in_(["FinanceManager", "Finance"])).all()
-            emails = [f.email for f in finance_users if f.email]
-            if emails and record.driver:
-                msg = Message(
-                    subject=f"Driver Sent to Finance Manager | تحويل السائق إلى المالية: {driver_name}",
-                    recipients=emails
-                )
-
-                msg.html = f"""
-                <html>
-                <body style="font-family: Arial, sans-serif; color: #333; background-color: #f8f9fa; padding: 20px;">
-                    <div style="max-width: 600px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.1);">
-
-                        <!-- English -->
-                        <div style="text-align: left;">
-                            <h2 style="color: #713183;">Driver Sent to Finance Manager</h2>
-                            <p>Dear Finance Team,</p>
-                            <p>Driver <strong>{driver_name}</strong> (Iqama: <strong>{record.driver.iqaama_number or "N/A"}</strong>) has been cleared by the Fleet Manager.</p>
-                            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                                <tr>
-                                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Fleet Damage Report</strong></td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_report or "N/A"}</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Damage Cost</strong></td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_cost or 0} SAR</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>TAMM Revoked</strong></td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{"Yes" if tamm_revoked else "No"}</td>
-                                </tr>
-                            </table>
-                            <p>Please proceed with the settlement.</p>
-                            <p>Login here to review: <a href="https://dobs.dobs.cloud/login</" target="_blank">Finance Dashboard</a></p>
-                        </div>
-
-                        <hr style="margin: 30px 0;">
-
-                        <!-- Arabic -->
-                        <div dir="rtl" lang="ar" style="text-align: right; font-family: Tahoma, sans-serif;">
-                            <h2 style="color: #713183;">تم تحويل السائق إلى المالية</h2>
-                            <p>السادة فريق المالية،</p>
-                            <p>تمت الموافقة على السائق <strong>{driver_name}</strong> (رقم الإقامة: <strong>{record.driver.iqaama_number or "N/A"}</strong>) من قبل مدير الأسطول.</p>
-                            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                                <tr>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">تقرير أضرار الأسطول</td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_report or "N/A"}</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">تكلفة الأضرار</td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_cost or 0} ريال سعودي</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">إلغاء صلاحية TAMM</td>
-                                    <td style="padding: 8px; border: 1px solid #ddd;">{"نعم" if tamm_revoked else "لا"}</td>
-                                </tr>
-                            </table>
-                            <p>يرجى متابعة التسوية حسب الإجراءات.</p>
-                            <p>Login هنا لمراجعة: <a href="https://dobs.dobs.cloud/login</e" target="_blank">لوحة المالية</a></p>
-                        </div>
-
-                        <hr style="margin: 30px 0;">
-
-                        <p style="text-align:center;">Regards / مع التحية,<br>Fleet Team / فريق الأسطول</p>
-
+                    <!-- Arabic -->
+                    <div dir="rtl" lang="ar" style="text-align: right; font-family: Tahoma, sans-serif;">
+                        <h2 style="color: #713183;">تم تحويل السائق إلى المالية</h2>
+                        <p>السادة فريق المالية،</p>
+                        <p>تمت الموافقة على السائق <strong>{driver_name}</strong> (رقم الإقامة: <strong>{record.driver.iqaama_number or "N/A"}</strong>) من قبل مدير الأسطول.</p>
+                        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd;">تقرير أضرار الأسطول</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_report or "N/A"}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd;">تكلفة الأضرار</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">{fleet_damage_cost or 0} ريال سعودي</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd;">إلغاء صلاحية TAMM</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">{"نعم" if tamm_revoked else "لا"}</td>
+                            </tr>
+                        </table>
+                        <p>يرجى متابعة التسوية حسب الإجراءات.</p>
+                        <p>Login هنا لمراجعة: <a href="https://dobs.dobs.cloud/login</e" target="_blank">لوحة المالية</a></p>
                     </div>
-                </body>
-                </html>
-                """
 
-                try:
-                    mail.send(msg)
-                except Exception as mail_err:
-                    current_app.logger.error(f"[FLEET] Finance notification email failed: {mail_err}")
+                    <hr style="margin: 30px 0;">
 
+                    <p style="text-align:center;">Regards / مع التحية,<br>Fleet Team / فريق الأسطول</p>
 
+                </div>
+            </body>
+            </html>
+            """
 
-            return jsonify({
-                "success": True,
-                "message": f"Driver {driver_name} cleared by Fleet and sent to Finance Manager.",
-                "cleared_at": now.strftime("%Y-%m-%d %H:%M"),
-                "damage_cost": fleet_damage_cost,
-                "damage_report": fleet_damage_report,
-                "tamm_revoked_at": tamm_revoked_at.strftime("%Y-%m-%d %H:%M") if tamm_revoked_at else None,
-                "released_assignment_count": released_assignment_count,
-            })
+            try:
+                mail.send(msg)
+            except Exception as mail_err:
+                current_app.logger.error(f"[FLEET] Finance notification email failed: {mail_err}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Driver {driver_name} cleared by Fleet and sent to Finance Manager.",
+            "cleared_at": now.strftime("%Y-%m-%d %H:%M"),
+            "damage_cost": fleet_damage_cost,
+            "damage_report": fleet_damage_report,
+            "tamm_revoked_at": tamm_revoked_at.strftime("%Y-%m-%d %H:%M") if tamm_revoked_at else None,
+            "released_assignment_count": released_assignment_count,
+        })
 
     except Exception as e:
         db.session.rollback()

@@ -2,14 +2,16 @@ import os
 import re
 from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, session, send_from_directory, make_response
 from extensions import db, mail, limiter
-from models import Driver, User, DriverDocument
+from models import Driver, User, DriverDocument, Branch
 from services.file_storage import save_to_shared_storage
 from utils.validation import parse_date
 from flask_mail import Message
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime
 from forms.common import PublicRegisterForm
+from services.admin_service import DEFAULT_DRIVER_PASSWORD
 
 public_bp = Blueprint("public", __name__)
 
@@ -56,17 +58,45 @@ def validate_english(value, field_name):
     return True
 
 
+def _dammam_branch_id():
+    branch = Branch.query.filter_by(name="Dammam").first()
+    return branch.id if branch else None
+
+
+def _validate_upload(file_storage, label: str) -> bool:
+    if not file_storage or not file_storage.filename:
+        flash(f"❌ {label} upload is required.", "danger")
+        return False
+
+    content_type = (file_storage.mimetype or "").lower()
+    if not (content_type.startswith("image/") or content_type == "application/pdf"):
+        flash(f"❌ Invalid file content for {label}. Only images or PDF are accepted.", "danger")
+        return False
+
+    max_len = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
+    file_storage.stream.seek(0, os.SEEK_END)
+    file_size = file_storage.stream.tell()
+    file_storage.stream.seek(0)
+    if file_size > max_len:
+        flash(f"❌ {label} file too large. Maximum 16 MB.", "danger")
+        return False
+
+    return True
+
+
+def _save_upload(file_storage, upload_folder: str, safe_name: str) -> str:
+    ext = file_storage.filename.rsplit(".", 1)[1].lower()
+    file_name = secure_filename(f"{safe_name}.{ext}")
+    file_storage.save(os.path.join(upload_folder, file_name))
+    return file_name
+
+
 # ------------------------
 # Landing / Front page
 # ------------------------
 @public_bp.route("/")
 def index():
-    lang = session.get("lang", "en")
-    filename = "rtl_index.html" if lang == "ar" else "index.html"
-    resp = _public_page_response(filename)
-    if resp is None:
-        return "Front page not found", 404
-    return resp
+    return render_template("index.html")
 
 
 # ------------------------
@@ -103,34 +133,27 @@ def register():
         nationality = form.nationality.data
         city = form.city.data
         previous_sponsor_number = form.previous_sponsor_number.data
-        iqama_card_upload = form.iqama_card_upload.data
 
-        # File validation (size + MIME)
-        if not iqama_card_upload or not iqama_card_upload.filename:
-            flash("❌ Iqama card upload is required.", "danger")
-            return redirect(url_for("public.register"))
-
-        content_type = (iqama_card_upload.mimetype or "").lower()
-        if not (content_type.startswith("image/") or content_type == "application/pdf"):
-            flash("❌ Invalid file content. Only images or PDF are accepted.", "danger")
-            return redirect(url_for("public.register"))
-
-        max_len = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
-        iqama_card_upload.stream.seek(0, os.SEEK_END)
-        file_size = iqama_card_upload.stream.tell()
-        iqama_card_upload.stream.seek(0)
-        if file_size > max_len:
-            flash("❌ File too large. Maximum 16 MB.", "danger")
-            return redirect(url_for("public.register"))
+        # Iqama, driving license, and passport are all required uploads.
+        uploads = {
+            "iqama": (form.iqama_card_upload.data, "Iqama card"),
+            "license": (form.driving_license_upload.data, "Driving license"),
+            "passport": (form.passport_upload.data, "Passport"),
+        }
+        for file_storage, label in uploads.values():
+            if not _validate_upload(file_storage, label):
+                return redirect(url_for("public.register"))
 
         upload_folder = _upload_root()
         safe_name = f"{name.replace(' ', '_').lower()}_{iqaama_number}"
-        ext = iqama_card_upload.filename.rsplit(".", 1)[1].lower()
-        file_name = secure_filename(f"{safe_name}.{ext}")
-        iqama_card_upload.save(os.path.join(upload_folder, file_name))
+        saved_filenames = {
+            doc_type: _save_upload(file_storage, upload_folder, f"{safe_name}_{doc_type}")
+            for doc_type, (file_storage, _label) in uploads.items()
+        }
 
         new_driver = Driver(
             name=name,
+            password=generate_password_hash(DEFAULT_DRIVER_PASSWORD),
             iqaama_number=iqaama_number,
             iqaama_expiry=iqaama_expiry,
             saudi_driving_license=saudi_driving_license,
@@ -138,7 +161,10 @@ def register():
             city=city,
             absher_number=absher_number,
             previous_sponsor_number=previous_sponsor_number,
-            iqama_card_upload=file_name,
+            iqama_card_upload=saved_filenames["iqama"],
+            driving_license_upload=saved_filenames["license"],
+            passport_upload=saved_filenames["passport"],
+            branch_id=_dammam_branch_id(),
             onboarding_stage="Ops Manager",
             driver_type_id=1,
         )
@@ -149,24 +175,25 @@ def register():
             new_driver.ensure_shared_driver_defaults()
             db.session.commit()
 
-            # Dual-write iqama to shared driver_documents store
-            try:
-                shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH", upload_folder)
-                iqama_card_upload.stream.seek(0)
-                relative_path = save_to_shared_storage(iqama_card_upload, new_driver.id, "iqama", shared_root)
-                iqama_card_upload.stream.seek(0, 2)
-                doc = DriverDocument(
-                    driver_id     = new_driver.id,
-                    document_type = "iqama",
-                    file_path     = relative_path,
-                    original_name = iqama_card_upload.filename,
-                    file_size     = iqama_card_upload.stream.tell(),
-                    uploaded_from = "dobs",
-                )
-                db.session.add(doc)
-                db.session.commit()
-            except Exception:
-                current_app.logger.exception("Shared storage dual-write failed for iqama registration")
+            # Dual-write all three documents to the shared driver_documents store
+            shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH", upload_folder)
+            for doc_type, (file_storage, _label) in uploads.items():
+                try:
+                    file_storage.stream.seek(0)
+                    relative_path = save_to_shared_storage(file_storage, new_driver.id, doc_type, shared_root)
+                    file_storage.stream.seek(0, 2)
+                    doc = DriverDocument(
+                        driver_id     = new_driver.id,
+                        document_type = doc_type,
+                        file_path     = relative_path,
+                        original_name = file_storage.filename,
+                        file_size     = file_storage.stream.tell(),
+                        uploaded_from = "dobs",
+                    )
+                    db.session.add(doc)
+                    db.session.commit()
+                except Exception:
+                    current_app.logger.exception("Shared storage dual-write failed for %s registration", doc_type)
         except IntegrityError as e:
             db.session.rollback()
             current_app.logger.exception("Public registration IntegrityError")
@@ -248,8 +275,7 @@ def register():
                 flash(f"{field}: {err}", "danger")
         current_app.logger.warning("Public registration validation failed", extra={"errors": form.errors})
 
-    template = "rtl_register.html" if session.get("lang") == "ar" else "register.html"
-    return render_template(template, form=form)
+    return render_template("register.html", form=form)
 
 
 # ------------------------
