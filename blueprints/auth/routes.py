@@ -8,45 +8,35 @@ import re
 import secrets
 
 from forms.auth import LoginForm
-from models import User, ResetToken  # dob_user model
+from forms.common import CSRFOnlyForm
+from models import User, ResetToken, Role  # dob_user model
 from extensions import db, login_manager, limiter
 from flask_mail import Message
 from services.rbac import user_role_names
+from services import impersonation
+from services.impersonation import ImpersonationError
 
 auth_bp = Blueprint("auth", __name__)
 
 
-def _role_key(role_raw: str) -> str:
-    return "".join(ch for ch in (role_raw or "").lower() if ch.isalnum())
-
-
-ROLE_DASHBOARD_ENDPOINTS = {
-    "superadmin": "admin.dashboard",
-    "hr": "hr.dashboard_hr",
-    "opscoordinator": "ops_coordinator.dashboard_ops_coordinator",
-    "opsmanager": "ops_manager.dashboard_ops",
-    "opssupervisor": "ops_supervisor.dashboard_ops_supervisor",
-    "fleetmanager": "fleet.dashboard_fleet",
-    "financemanager": "finance.dashboard_finance",
-}
-
-
 def _post_login_redirect(user):
     """Multi-role users (granted extra roles via the admin Access page) land
-    on a role picker; single-role users go straight to their dashboard,
-    exactly as before."""
+    on a role picker; single-role users go straight to their dashboard.
+    Dashboard routing is data (Role.dashboard_endpoint), not a hardcoded
+    role-string dict, so a newly created custom role works here too as soon
+    as an admin assigns it a dashboard via the Roles & Permissions screen."""
     role_names = user_role_names(user)
     if len(role_names) > 1:
         return redirect(url_for("auth.choose_role"))
 
-    role_key = _role_key(user.role)
-    target = ROLE_DASHBOARD_ENDPOINTS.get(role_key)
+    role_name = next(iter(role_names), None)
+    role = Role.query.filter_by(name=role_name).first() if role_name else None
+    target = role.dashboard_endpoint if role else None
     if not target:
         current_app.logger.warning(
             "login_role_unmapped", extra={"user": user.username, "role": user.role}
         )
-        flash("Role is not configured for redirect.", "warning")
-        return redirect(url_for("auth.login"))
+        return redirect(url_for("auth.no_dashboard"))
 
     current_app.logger.info(
         "login_redirect", extra={"user": user.username, "role": user.role, "target": target}
@@ -115,22 +105,55 @@ def login():
 @login_required
 def choose_role():
     role_names = sorted(user_role_names(current_user))
-    roles = [
-        {"name": name, "endpoint": ROLE_DASHBOARD_ENDPOINTS.get(_role_key(name))}
-        for name in role_names
-    ]
+    endpoint_by_name = {
+        r.name: r.dashboard_endpoint
+        for r in Role.query.filter(Role.name.in_(role_names)).all()
+    }
+    roles = [{"name": name, "endpoint": endpoint_by_name.get(name)} for name in role_names]
     return render_template("choose_role.html", roles=roles)
+
+
+@auth_bp.route("/no-dashboard", methods=["GET"])
+@login_required
+def no_dashboard():
+    """Landing page for a user whose only role has no dashboard configured
+    yet - a data-entry gap (admin created a role but hasn't assigned it a
+    dashboard via Roles & Permissions), not something the user can fix."""
+    role_names = sorted(user_role_names(current_user))
+    return render_template("no_dashboard.html", role_names=role_names)
+
 
 @auth_bp.route("/logout")
 @login_required
 @limiter.limit("30 per minute")
 def logout():
+    if session.get("impersonator_id"):
+        impersonation.close_dangling_log(session)
     logout_user()
     flash("You have been logged out.", "info")
     current_app.logger.info(
         "logout", extra={"username": getattr(current_user, 'username', None), "ip": request.remote_addr, "path": request.path}
     )
     return redirect(url_for("auth.login"))
+
+
+@auth_bp.route("/stop-impersonation", methods=["POST"])
+@login_required
+def stop_impersonation():
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    try:
+        admin_user = impersonation.stop(session)
+    except ImpersonationError as e:
+        flash(str(e), "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    login_user(admin_user)
+    flash("Back to your own account.", "info")
+    return redirect(url_for("admin.dashboard"))
 
 
 @auth_bp.route("/login/otp", methods=["GET", "POST"])

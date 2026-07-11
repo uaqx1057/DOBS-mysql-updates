@@ -180,6 +180,14 @@ class Driver(db.Model):
     fleet_manager_approved_at = db.Column(db.DateTime, nullable=True)
     finance_approved_at = db.Column(db.DateTime, nullable=True)
     ops_manager_approved = db.Column(db.Boolean, default=False)
+    # Rejection is only ever allowed at Ops Manager or HR's first pass -
+    # once a driver has moved past HR, platform IDs/contracts are already
+    # in motion and unwinding them goes through offboarding instead, not a
+    # simple reject. rejected_by_stage records which of the two rejected
+    # them, for audit/reporting.
+    rejected_by_stage = db.Column(db.String(50), nullable=True)
+    rejected_at = db.Column(db.DateTime, nullable=True)
+    reject_reason = db.Column(db.String(500), nullable=True)
     # Set by Ops Manager alongside driver_type_id - determines whether the
     # Fleet Manager stage is included for Freelancer/Manpower drivers (see
     # dobs_onboarding_stage_template's skip_condition_field).
@@ -411,6 +419,17 @@ class Offboarding(db.Model):
     finance_adjustments = db.Column(db.Numeric(12, 2))
     finance_note = db.Column(db.Text)
 
+    # DMS's own running payroll balance (driver_salary_slips.closing_balance,
+    # positive = company owes driver), snapshotted when Finance clears, plus
+    # the computed net settlement combining it with Ops Supervisor's penalty
+    # and Fleet's damage cost. dms_salary_slip_id records which DMS slip the
+    # snapshot came from, so HR-finalize knows exactly what to mark settled
+    # back in DMS.
+    dms_salary_balance = db.Column(db.Numeric(12, 2))
+    dms_salary_slip_id = db.Column(db.Integer)
+    net_settlement_amount = db.Column(db.Numeric(12, 2))
+    settlement_direction = db.Column(db.String(20))  # company_owes_driver | driver_owes_company | even
+
     hr_cleared = db.Column(db.Boolean, default=False)
     hr_cleared_at = db.Column(db.DateTime)
     hr_note = db.Column(db.Text)
@@ -420,7 +439,18 @@ class Offboarding(db.Model):
 
     company_contract_cancelled = db.Column(db.Boolean, default=False)
     qiwa_contract_cancelled = db.Column(db.Boolean, default=False)
+    # Settlement confirmed paid, in either direction (company->driver or
+    # driver->company) - same field the HR finalize form has always used,
+    # meaning broadened rather than renamed to avoid unnecessary schema churn.
     salary_paid = db.Column(db.Boolean, default=False)
+    # Alternate resolution when payment hasn't happened yet: driver owes
+    # company but can't pay now -> promissory note; company owes driver but
+    # hasn't paid yet -> payment letter committing to pay within N days.
+    promissory_note_issued = db.Column(db.Boolean, default=False)
+    promissory_note_at = db.Column(db.DateTime)
+    payment_letter_issued = db.Column(db.Boolean, default=False)
+    payment_letter_due_days = db.Column(db.Integer)
+    payment_letter_at = db.Column(db.DateTime)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -582,6 +612,7 @@ class Role(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
     description = db.Column(db.String(255), nullable=True)
+    dashboard_endpoint = db.Column(db.String(100), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
@@ -630,6 +661,25 @@ class UserPermission(db.Model):
     permission = db.relationship("Permission")
 
 
+class ImpersonationLog(db.Model):
+    """Audit trail for SuperAdmin 'login as user'. One row per
+    start/stop cycle - ended_at stays NULL while the impersonation is live."""
+    __tablename__ = "dobs_impersonation_log"
+
+    id = db.Column(db.Integer, primary_key=True)
+    admin_user_id = db.Column(db.Integer, db.ForeignKey("dobs_user.id"), nullable=False, index=True)
+    target_user_id = db.Column(db.Integer, db.ForeignKey("dobs_user.id"), nullable=False, index=True)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    ended_at = db.Column(db.DateTime, nullable=True)
+    ip_address = db.Column(db.String(64), nullable=True)
+
+    admin_user = db.relationship("User", foreign_keys=[admin_user_id])
+    target_user = db.relationship("User", foreign_keys=[target_user_id])
+
+    def __repr__(self):
+        return f"<ImpersonationLog admin={self.admin_user_id} target={self.target_user_id} ended={self.ended_at is not None}>"
+
+
 # =========================
 # Onboarding workflow / contract configuration
 #
@@ -656,11 +706,39 @@ class OnboardingStageTemplate(db.Model):
         return f"<OnboardingStageTemplate type={self.driver_type_id} #{self.sequence_order} {self.stage_name}>"
 
 
+class CompanyPreset(db.Model):
+    """Singleton row (id is always 1) holding the company-side identity/
+    signatory defaults pre-filled into new contract and promissory note
+    templates - editable by SuperAdmin under Workflow & Contracts instead of
+    only via CONTRACT_* environment variables. Blank fields fall back to
+    those env-configured defaults (see blueprints/admin/routes.py
+    _get_company_preset)."""
+    __tablename__ = "dobs_company_preset"
+
+    id = db.Column(db.Integer, primary_key=True)
+    first_party_name = db.Column(db.String(150), nullable=True)
+    first_party_name_ar = db.Column(db.String(150), nullable=True)
+    first_party_label = db.Column(db.String(100), nullable=True)
+    first_party_label_ar = db.Column(db.String(100), nullable=True)
+    second_party_label = db.Column(db.String(100), nullable=True)
+    second_party_label_ar = db.Column(db.String(100), nullable=True)
+    company_signatory_name = db.Column(db.String(150), nullable=True)
+    company_signatory_title = db.Column(db.String(150), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<CompanyPreset {self.first_party_name}>"
+
+
 class DriverTypeSettings(db.Model):
     __tablename__ = "dobs_driver_type_settings"
 
     driver_type_id = db.Column(db.Integer, db.ForeignKey("driver_types.id"), primary_key=True)
     contract_mode = db.Column(db.String(20), nullable=False, default="single")  # "single" | "per_business"
+    # Qiwa (Ministry of HR platform) contracts are a company-sponsorship
+    # concept - only ever relevant for Sponsor-type drivers, never
+    # Freelancer/Manpower. Enforced in services/hr_service.py.
+    requires_qiwa_contract = db.Column(db.Boolean, nullable=False, default=False)
 
     driver_type = db.relationship("DriverType")
 
@@ -678,6 +756,36 @@ class ContractTemplate(db.Model):
     body_content = db.Column(db.Text, nullable=False)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     version = db.Column(db.String(20), default="1.0")
+    document_kind = db.Column(db.String(40), nullable=True, default="driver_contract")
+    language_mode = db.Column(db.String(20), nullable=True, default="bilingual")
+    layout_type = db.Column(db.String(40), nullable=True, default="structured_contract")
+    first_party_name = db.Column(db.String(150), nullable=True)
+    first_party_name_ar = db.Column(db.String(150), nullable=True)
+    first_party_label = db.Column(db.String(100), nullable=True)
+    first_party_label_ar = db.Column(db.String(100), nullable=True)
+    second_party_label = db.Column(db.String(100), nullable=True)
+    second_party_label_ar = db.Column(db.String(100), nullable=True)
+    intro_content = db.Column(db.Text, nullable=True)
+    intro_content_ar = db.Column(db.Text, nullable=True)
+    eligibility_content = db.Column(db.Text, nullable=True)
+    eligibility_content_ar = db.Column(db.Text, nullable=True)
+    general_terms_content = db.Column(db.Text, nullable=True)
+    general_terms_content_ar = db.Column(db.Text, nullable=True)
+    target_orders = db.Column(db.Integer, nullable=True)
+    target_salary = db.Column(db.Numeric(12, 2), nullable=True)
+    bonus_per_extra_order = db.Column(db.Numeric(12, 2), nullable=True)
+    deduction_per_missing_order = db.Column(db.Numeric(12, 2), nullable=True)
+    calculation_tiers_json = db.Column(db.Text, nullable=True)
+    company_signatory_name = db.Column(db.String(150), nullable=True)
+    company_signatory_title = db.Column(db.String(150), nullable=True)
+    # body_content is nullable=False (required English body); its Arabic
+    # counterpart is optional so existing rows (and the one hardcoded
+    # default driver-contract sentence, translated in
+    # services/contracts.py _translate_contract_sections) keep working
+    # without every template needing to backfill it immediately.
+    body_content_ar = db.Column(db.Text, nullable=True)
+    signature_notes = db.Column(db.Text, nullable=True)
+    signature_notes_ar = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -686,3 +794,36 @@ class ContractTemplate(db.Model):
 
     def __repr__(self):
         return f"<ContractTemplate {self.name} business={self.business_id} type={self.driver_type_id}>"
+
+
+class SharedGeneratedDriverContract(db.Model):
+    __tablename__ = "shared_generated_driver_contracts"
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    reference_number = db.Column(db.String(40), unique=True, nullable=False)
+    driver_id = db.Column(db.BigInteger, db.ForeignKey("drivers.id"), nullable=False)
+    template_id = db.Column(db.BigInteger, db.ForeignKey("dobs_contract_template.id"), nullable=True)
+    driver_document_id = db.Column(db.BigInteger, nullable=True)
+    business_id = db.Column(db.BigInteger, db.ForeignKey("businesses.id"), nullable=True)
+    generated_by = db.Column(db.BigInteger, nullable=True)
+    driver_type_id = db.Column(db.Integer, db.ForeignKey("driver_types.id"), nullable=True)
+    generated_from_system = db.Column(db.String(20), nullable=False)
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)
+    file_path = db.Column(db.String(500), nullable=False)
+    original_name = db.Column(db.String(255), nullable=True)
+    storage_disk = db.Column(db.String(100), nullable=False, default="shared_driver_documents")
+    signed_status = db.Column(db.String(30), nullable=False, default="pending")
+    signed_at = db.Column(db.DateTime, nullable=True)
+    signed_copy_path = db.Column(db.String(500), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+
+    driver = db.relationship("Driver")
+    business = db.relationship("Business")
+    template = db.relationship("ContractTemplate")
+    driver_type = db.relationship("DriverType")
+
+    def __repr__(self):
+        return f"<SharedGeneratedDriverContract ref={self.reference_number} driver={self.driver_id}>"

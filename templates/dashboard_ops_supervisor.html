@@ -27,7 +27,7 @@
   <div class="driver-cards" id="onboardingCards">
     {% for driver in onboarding_drivers %}
     <div class="driver-card reveal" data-search="{{ driver.name }} {{ driver.iqaama_number }}"
-         data-driver='{{ dict(id=driver.id, name=driver.name, iqaama_number=driver.iqaama_number, nationality=driver.nationality, city=driver.city, absher_number=driver.absher_number, iqama_card_upload=driver.iqama_card_upload, issued_mobile_number=driver.issued_mobile_number, issued_device_id=driver.issued_device_id, mobile_issued=driver.mobile_issued) | tojson }}'>
+         data-driver='{{ dict(id=driver.id, name=driver.name, iqaama_number=driver.iqaama_number, nationality=driver.nationality, city=driver.city, absher_number=driver.absher_number, iqama_card_upload=driver.iqama_card_upload, mobile_issued=driver.mobile_issued, assigned_businesses=driver_businesses.get(driver.id, [])) | tojson }}'>
       <h3>{{ driver.name }}</h3>
       <p>{{ tr('Iqama', 'الإقامة') }}: {{ driver.iqaama_number }}</p>
       <p>{{ tr('City', 'المدينة') }}: {{ driver.city or '—' }}</p>
@@ -62,17 +62,15 @@
       <div class="modal-body">
         <div id="driverInfoArea" class="mb-3"></div>
         <label class="form-label">{{ tr('Platform / Business Assignment', 'تعيين المنصة / النشاط') }}</label>
-        <div id="businessContainer" class="mb-2"></div>
-        <button type="button" id="addBusinessBtn" class="btn btn-sm btn-outline-primary mb-3">+ {{ tr('Add Business', 'إضافة نشاط') }}</button>
-        <label class="form-label">{{ tr('Issued Mobile Number', 'رقم الجوال الصادر') }}</label>
-        <input class="form-control mb-3" name="issued_mobile_number" id="issued_mobile_number">
-        <label class="form-label">{{ tr('Issued Device ID', 'رقم الجهاز الصادر') }}</label>
-        <input class="form-control mb-3" name="issued_device_id" id="issued_device_id">
+        <p class="text-muted small mb-2">{{ tr('Only the platform(s) already selected by Ops Manager are shown - choose the specific account ID for each.', 'يتم عرض المنصة (المنصات) التي اختارها مدير العمليات فقط - اختر رقم الحساب المحدد لكل منها.') }}</p>
+        <div id="businessContainer" class="mb-3"></div>
         <div class="form-check"><input class="form-check-input" type="checkbox" name="mobile_issued" value="1" id="mobile_issued"><label class="form-check-label" for="mobile_issued">{{ tr('Mobile Issued', 'تم تسليم الجهاز') }}</label></div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
+        {% if can_approve_onboarding %}
         <button type="submit" class="btn btn-primary">{{ tr('Approve & Send to Fleet', 'الموافقة وإرسال للأسطول') }}</button>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -92,7 +90,9 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
+        {% if can_clear_offboarding %}
         <button type="submit" class="btn btn-primary">{{ tr('Clear & Send to Fleet', 'تصفية وإرسال للأسطول') }}</button>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -121,10 +121,49 @@
 {% block scripts_extra %}
 <script>
 (function () {
-  var allBusinesses = {{ all_businesses | tojson }};
-  var picker = DobsUI.initBusinessPicker(document.getElementById('businessContainer'), document.getElementById('addBusinessBtn'), allBusinesses);
   var currentOffId = null;
   var csrfToken = "{{ csrf_token() }}";
+  var businessContainer = document.getElementById('businessContainer');
+  var currentAssignedCount = 0;
+
+  function renderAssignedBusinesses(assignedBusinesses) {
+    businessContainer.innerHTML = '';
+    currentAssignedCount = (assignedBusinesses || []).length;
+
+    if (!currentAssignedCount) {
+      businessContainer.innerHTML = '<div class="text-muted small">{{ tr("No platform was assigned by Ops Manager for this driver.", "لم يتم تعيين أي منصة من قبل مدير العمليات لهذا السائق.") }}</div>';
+      return;
+    }
+
+    assignedBusinesses.forEach(function (biz) {
+      var row = document.createElement('div');
+      row.className = 'mb-2';
+
+      var label = document.createElement('label');
+      label.className = 'form-label small fw-semibold mb-1';
+      label.textContent = biz.name;
+      row.appendChild(label);
+
+      var select = document.createElement('select');
+      select.className = 'form-select';
+      select.name = 'platform_id[]';
+      select.multiple = true;
+      (biz.available_ids || []).forEach(function (idObj) {
+        var opt = document.createElement('option');
+        opt.value = idObj.id;
+        opt.textContent = idObj.value;
+        select.appendChild(opt);
+      });
+      if (!(biz.available_ids || []).length) {
+        var emptyOpt = document.createElement('option');
+        emptyOpt.disabled = true;
+        emptyOpt.textContent = '{{ tr("No available IDs for this platform", "لا توجد أرقام متاحة لهذه المنصة") }}';
+        select.appendChild(emptyOpt);
+      }
+      row.appendChild(select);
+      businessContainer.appendChild(row);
+    });
+  }
 
   document.querySelectorAll('#onboardingCards .driver-card').forEach(function (card) {
     card.addEventListener('click', function () {
@@ -133,21 +172,18 @@
       var info = '{{ tr("Iqama","الإقامة") }}: ' + (d.iqaama_number || '—') + ' · {{ tr("City","المدينة") }}: ' + (d.city || '—') + ' · {{ tr("Nationality","الجنسية") }}: ' + (d.nationality || '—');
       document.getElementById('driverInfoArea').textContent = info;
       document.getElementById('approveForm').action = '/dashboard/ops_supervisor/approve_driver/' + d.id;
-      document.getElementById('issued_mobile_number').value = d.issued_mobile_number || '';
-      document.getElementById('issued_device_id').value = d.issued_device_id || '';
       document.getElementById('mobile_issued').checked = !!d.mobile_issued;
-      picker.clear();
-      picker.addRow();
+      renderAssignedBusinesses(d.assigned_businesses);
       DobsUI.openModal('driverModal');
     });
   });
 
-  document.getElementById('approveForm').addEventListener('submit', function () {
+  document.getElementById('approveForm').addEventListener('submit', function (event) {
     var ids = Array.from(document.querySelectorAll('select[name="platform_id[]"]'))
       .flatMap(function (sel) { return Array.from(sel.selectedOptions).map(function (o) { return o.value; }); })
       .filter(Boolean);
-    if (!ids.length) {
-      alert({{ tr('Please select at least one platform ID.', 'يرجى اختيار معرف منصة واحد على الأقل.') | tojson }});
+    if (currentAssignedCount && !ids.length) {
+      alert({{ tr('Please select the platform ID for the assigned business(es).', 'يرجى اختيار معرف المنصة للنشاط (الأنشطة) المعينة.') | tojson }});
       event.preventDefault();
       return;
     }

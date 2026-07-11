@@ -8,7 +8,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from utils.email_utils import send_password_change_email
 from forms.common import ChangePasswordForm, OpsCoordinatorOffboardingForm
 from services import offboarding_workflow
-from services.rbac import require_permission
+from services.rbac import require_permission, user_can_access_dashboard, user_has_permission
 
 
 ops_coordinator_bp = Blueprint("ops_coordinator", __name__)
@@ -28,7 +28,7 @@ def _is_ops_coordinator(user) -> bool:
 @ops_coordinator_bp.route("/dashboard")
 @login_required
 def dashboard_ops_coordinator():
-    if not _is_ops_coordinator(current_user):
+    if not user_can_access_dashboard(current_user, "ops_coordinator.dashboard_ops_coordinator"):
         current_app.logger.warning(
             "[ops_coordinator] access denied: role=%s id=%s",
             current_user.role,
@@ -59,6 +59,7 @@ def dashboard_ops_coordinator():
         completed_drivers=completed_drivers,
         count_completed=len(completed_drivers),
         q=q,
+        can_request_offboarding=user_has_permission(current_user, "offboarding.request"),
     )
 
 

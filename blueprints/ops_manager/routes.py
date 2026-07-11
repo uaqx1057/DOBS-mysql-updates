@@ -3,7 +3,7 @@ from email.mime.text import MIMEText
 import smtplib
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask_login import login_required, current_user
-from models import Driver, DriverType, Offboarding, User
+from models import Business, BusinessDriver, Driver, DriverType, Offboarding, User
 from extensions import db, mail, limiter
 from flask_mail import Message
 from datetime import datetime
@@ -20,6 +20,7 @@ from utils.email_utils import send_password_change_email
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask import jsonify
 from services import onboarding_workflow, offboarding_workflow
+from services.rbac import require_permission, user_can_access_dashboard, user_has_permission
 
 
  
@@ -43,7 +44,7 @@ def _validate_csrf():
 @ops_manager_bp.route("/dashboard")
 @login_required
 def dashboard_ops():
-    if current_user.role != "OpsManager":
+    if not user_can_access_dashboard(current_user, "ops_manager.dashboard_ops"):
         flash("Access denied. Ops Manager role required.", "danger")
         return redirect(url_for("auth.login"))
 
@@ -98,6 +99,7 @@ def dashboard_ops():
         })
 
     driver_types = DriverType.query.filter(DriverType.deleted_at.is_(None)).order_by(DriverType.name).all()
+    platforms = Business.query.filter(Business.deleted_at.is_(None)).order_by(Business.name).all()
 
     return render_template(
         "dashboard_ops.html",
@@ -110,7 +112,10 @@ def dashboard_ops():
         count_onboarded=len(fully_onboarded_drivers),
         count_rejected=len(rejected),
         driver_types=driver_types,
+        platforms=platforms,
         offboarding_stage_sequence=["Requested", "OpsSupervisor", "Fleet", "Finance", "HR", "Completed"],
+        can_approve_onboarding=user_has_permission(current_user, "onboarding.ops_manager.approve"),
+        can_approve_offboarding=user_has_permission(current_user, "offboarding.ops_manager.approve"),
     )
 
 # -------------------------
@@ -119,6 +124,7 @@ def dashboard_ops():
 @ops_manager_bp.route("/approve_driver/<int:driver_id>", methods=["POST"])
 @limiter.limit("30 per minute")
 @login_required
+@require_permission("onboarding.ops_manager.approve")
 def approve_driver(driver_id):
     """
     Approve driver at Ops Manager stage and forward to HR.
@@ -127,10 +133,6 @@ def approve_driver(driver_id):
     - Move onboarding_stage to "HR".
     - Notify HR team by email (safely).
     """
-    if current_user.role != "OpsManager":
-        flash("Access denied. Ops Manager role required.", "danger")
-        return redirect(url_for("auth.login"))
-
     form = OpsManagerApproveForm()
     if not form.validate_on_submit():
         flash("Invalid or missing CSRF token. Please try again.", "danger")
@@ -148,6 +150,27 @@ def approve_driver(driver_id):
         flash("Please select a valid driver type.", "danger")
         return redirect(url_for("ops_manager.dashboard_ops"))
 
+    # Freelancer drivers get one contract per platform at HR (see
+    # services/contracts.py generate_driver_contracts, DriverTypeSettings.
+    # contract_mode == "per_business"), so the platform has to be picked here,
+    # before HR ever runs - not left for Ops Supervisor's later platform-ID
+    # step, which is a different concept (the actual account ID/number).
+    platform = None
+    if driver_type.is_freelancer:
+        if not form.platform_business_id.data:
+            flash("Please select which platform this driver will work for.", "danger")
+            return redirect(url_for("ops_manager.dashboard_ops"))
+        platform = Business.query.filter(
+            Business.id == form.platform_business_id.data, Business.deleted_at.is_(None)
+        ).first()
+        if not platform:
+            flash("Please select a valid platform.", "danger")
+            return redirect(url_for("ops_manager.dashboard_ops"))
+    elif form.platform_business_id.data:
+        platform = Business.query.filter(
+            Business.id == form.platform_business_id.data, Business.deleted_at.is_(None)
+        ).first()
+
     # Optional: allow ops manager to add a short note (not required)
     ops_note = form.ops_note.data.strip() if form.ops_note.data else ""
 
@@ -163,9 +186,18 @@ def approve_driver(driver_id):
     # Driver type (Sponsor/Freelancer/Manpower/...) decides the rest of the
     # onboarding sequence - see services/onboarding_workflow.py. The vehicle
     # flag only matters for types whose sequence has a conditional Fleet
-    # Manager stage (skip_condition_field="will_provide_vehicle").
+    # Manager stage (skip_condition_field="will_provide_vehicle"). Sponsored
+    # (non-freelancer) types always get a company vehicle - the UI auto-picks
+    # "Yes" for them, so this only ever reflects a real freelancer choice.
     driver.driver_type_id = driver_type.id
-    driver.will_provide_vehicle = form.will_provide_vehicle.data == "true"
+    driver.will_provide_vehicle = (not driver_type.is_freelancer) or form.will_provide_vehicle.data == "true"
+
+    if platform and not BusinessDriver.query.filter_by(driver_id=driver.id, business_id=platform.id).first():
+        db.session.add(BusinessDriver(driver_id=driver.id, business_id=platform.id))
+        # Legacy display field read as a fallback wherever the specific
+        # platform account ID (assigned later by Ops Supervisor) isn't set
+        # yet - see blueprints/reports/routes.py _format_platform_assignments.
+        driver.platform = platform.name
 
     onboarding_workflow.advance(driver, from_stage="Ops Manager")
 
@@ -291,6 +323,7 @@ def approve_driver(driver_id):
 @ops_manager_bp.route("/reject_driver/<int:driver_id>", methods=["POST"])
 @limiter.limit("20 per minute")
 @login_required
+@require_permission("onboarding.ops_manager.approve")
 def reject_driver(driver_id):
     """
     Reject driver at Ops Manager stage.
@@ -298,10 +331,6 @@ def reject_driver(driver_id):
     - Set ops_manager_rejected flag and timestamp
     - Store optional reason
     """
-    if current_user.role != "OpsManager":
-        flash("Access denied. Ops Manager role required.", "danger")
-        return redirect(url_for("auth.login"))
-
     form = OpsManagerRejectForm()
     if not form.validate_on_submit():
         flash("Invalid or missing CSRF token. Please try again.", "danger")
@@ -324,9 +353,9 @@ def reject_driver(driver_id):
     # Update driver record
     driver.onboarding_stage = "Rejected"
     driver.ops_manager_approved = False
-    driver.ops_manager_rejected = True
-    driver.ops_manager_rejected_at = datetime.utcnow()
-    driver.ops_manager_reject_reason = reject_reason or "No reason provided"
+    driver.rejected_by_stage = "Ops Manager"
+    driver.rejected_at = datetime.utcnow()
+    driver.reject_reason = reject_reason or "No reason provided"
 
     # Save to DB
     try:
@@ -398,11 +427,8 @@ def change_password():
 # -------------------------
 @ops_manager_bp.route("/request_offboarding/<int:driver_id>", methods=["POST"])
 @login_required
+@require_permission("offboarding.ops_manager.approve")
 def request_offboarding(driver_id):
-    if current_user.role != "OpsManager":  # ✅ fixed (no space)
-        flash("Access denied", "danger")
-        return redirect(url_for("ops_manager.dashboard_ops"))
-
     form = OpsManagerOffboardingForm()
     if not form.validate_on_submit():
         flash("Invalid or missing CSRF token. Please try again.", "danger")
@@ -512,11 +538,8 @@ def request_offboarding(driver_id):
 
 @ops_manager_bp.route("/reject_offboarding/<int:driver_id>", methods=["POST"])
 @login_required
+@require_permission("offboarding.ops_manager.approve")
 def reject_offboarding(driver_id):
-    if current_user.role != "OpsManager":
-        flash("Access denied. Ops Manager role required.", "danger")
-        return redirect(url_for("auth.login"))
-
     if not _validate_csrf():
         flash("Invalid or missing CSRF token. Please try again.", "danger")
         return redirect(url_for("ops_manager.dashboard_ops"))

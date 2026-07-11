@@ -78,7 +78,9 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
+        {% if can_assign_vehicle %}
         <button type="submit" class="btn btn-primary">{{ tr('Assign Vehicle', 'تعيين المركبة') }}</button>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -99,7 +101,9 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
+        {% if can_clear_offboarding %}
         <button type="submit" class="btn btn-primary">{{ tr('Submit', 'إرسال') }}</button>
+        {% endif %}
       </div>
     </form>
   </div>

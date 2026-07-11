@@ -956,6 +956,29 @@ body.no-scroll { overflow: hidden; }
   border-block-end: 1px solid var(--topbar-border);
 }
 
+.impersonation-banner {
+  position: sticky;
+  top: var(--topbar-height, 64px);
+  z-index: var(--z-topbar);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-6);
+  background: var(--warning);
+  color: #fff;
+  font-size: var(--text-sm);
+  animation: dobs-slide-in-top var(--duration-base) var(--ease-standard) both;
+}
+
+.impersonation-banner strong {
+  font-weight: var(--font-weight-bold);
+}
+
+.impersonation-banner form {
+  margin: 0;
+}
+
 .topbar-menu-btn {
   display: none;
   align-items: center;

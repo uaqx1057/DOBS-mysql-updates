@@ -19,6 +19,7 @@
         <tr>
           <th>{{ tr('Role', 'الدور') }}</th>
           <th>{{ tr('Description', 'الوصف') }}</th>
+          <th>{{ tr('Dashboard', 'لوحة التحكم') }}</th>
           <th>{{ tr('Users', 'المستخدمون') }}</th>
           <th>{{ tr('Type', 'النوع') }}</th>
           <th></th>
@@ -29,6 +30,20 @@
         <tr>
           <td><strong>{{ role.name }}</strong></td>
           <td class="text-secondary small">{{ role.description or '—' }}</td>
+          <td>
+            {% if role.name in legacy_role_names %}
+            <span class="text-secondary small">{{ role.dashboard_endpoint or '—' }}</span>
+            {% else %}
+            <form method="post" action="{{ url_for('admin.set_role_dashboard', role_id=role.id) }}" class="d-flex gap-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select name="dashboard_endpoint" class="form-select form-select-sm" onchange="this.form.submit()">
+                {% for code, label in dashboard_choices %}
+                <option value="{{ code }}" {{ 'selected' if role.dashboard_endpoint == code or (not role.dashboard_endpoint and not code) }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </form>
+            {% endif %}
+          </td>
           <td>{{ user_counts.get(role.id, 0) }}</td>
           <td>
             {% if role.name in legacy_role_names %}
@@ -62,6 +77,10 @@
     <div class="col-auto" style="min-width:280px;">
       <label class="form-label">{{ tr('Description', 'الوصف') }}</label>
       {{ role_form.description(class_="form-control", placeholder=tr('What this role is for', 'الغرض من هذا الدور')) }}
+    </div>
+    <div class="col-auto">
+      <label class="form-label">{{ tr('Dashboard', 'لوحة التحكم') }}</label>
+      {{ role_form.dashboard_endpoint(class_="form-select") }}
     </div>
     <div class="col-auto"><button class="btn btn-primary" type="submit">{{ tr('Create Role', 'إنشاء دور') }}</button></div>
   </form>

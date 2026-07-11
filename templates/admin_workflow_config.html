@@ -1,15 +1,16 @@
 {% extends "base.html" %}
 
-{% block title %}{{ tr('Onboarding Workflow & Contract Templates', 'سير عمل الانضمام وقوالب العقود') }} — DOBS{% endblock %}
-{% block navbar_title %}{{ tr('Workflow & Contracts', 'سير العمل والعقود') }}{% endblock %}
+{% block title %}{{ tr('Onboarding Workflow Configuration', 'إعداد سير عمل الانضمام') }} - DOBS{% endblock %}
+{% block navbar_title %}{{ tr('Workflow Configuration', 'إعداد سير العمل') }}{% endblock %}
 {% block navbar_actions %}
 <a href="{{ url_for('admin.dashboard') }}" class="nav-btn">&larr; {{ tr('Back to Dashboard', 'العودة للوحة التحكم') }}</a>
+<a href="{{ url_for('admin.contract_templates') }}" class="nav-btn">{{ tr('Driver Contract Templates', 'قوالب عقود السائقين') }}</a>
 {% endblock %}
 
 {% block content %}
 <div class="page-header reveal">
   <h1 class="page-title">{{ tr('Onboarding Sequence per Driver Type', 'تسلسل الانضمام لكل نوع سائق') }}</h1>
-  <p class="page-subtitle">{{ tr('Add, remove, or reorder stages per driver type. A stage with a skip condition is skipped when the driver field matches that value.', 'إضافة أو إزالة أو إعادة ترتيب المراحل لكل نوع سائق. تُتخطى المرحلة عند تطابق شرط التخطي.') }}</p>
+  <p class="page-subtitle">{{ tr('Manage the onboarding stages and workflow behavior for each driver type.', 'إدارة مراحل الانضمام وسلوك سير العمل لكل نوع سائق.') }}</p>
 </div>
 
 <div class="card reveal mb-4">
@@ -20,14 +21,22 @@
     {% if rows %}
     <div class="table-responsive">
       <table class="table table-sm">
-        <thead><tr><th>#</th><th>{{ tr('Stage', 'المرحلة') }}</th><th>{{ tr('Skip if field', 'تخطي إذا') }}</th><th>= {{ tr('value', 'القيمة') }}</th><th></th></tr></thead>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>{{ tr('Stage', 'المرحلة') }}</th>
+            <th>{{ tr('Skip if field', 'تخطي إذا') }}</th>
+            <th>= {{ tr('value', 'القيمة') }}</th>
+            <th></th>
+          </tr>
+        </thead>
         <tbody>
           {% for row in rows %}
           <tr>
             <td>{{ row.sequence_order }}</td>
             <td>{{ row.stage_name }}</td>
-            <td>{{ row.skip_condition_field or '—' }}</td>
-            <td>{{ row.skip_condition_value or '—' }}</td>
+            <td>{{ row.skip_condition_field or '-' }}</td>
+            <td>{{ row.skip_condition_value or '-' }}</td>
             <td>
               <form method="post" action="{{ url_for('admin.delete_stage_template', row_id=row.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -59,54 +68,30 @@
 
 <div class="page-header reveal">
   <h1 class="page-title">{{ tr('Contract Mode per Driver Type', 'وضع العقد لكل نوع سائق') }}</h1>
-  <p class="page-subtitle">{{ tr('"Single" = one fixed contract. "Per business" = one contract per assigned business.', '"مفرد" = عقد ثابت واحد. "لكل نشاط" = عقد واحد لكل نشاط معيّن.') }}</p>
+  <p class="page-subtitle">{{ tr('"Single" means one fixed contract. "Per business" means one contract per assigned business.', '"مفرد" يعني عقدًا ثابتًا واحدًا. "لكل نشاط" يعني عقدًا واحدًا لكل نشاط معين.') }}</p>
 </div>
 
 <div class="card reveal mb-4">
   <div class="table-responsive">
     <table class="table table-sm">
-      <thead><tr><th>{{ tr('Driver Type', 'نوع السائق') }}</th><th>{{ tr('Contract Mode', 'وضع العقد') }}</th></tr></thead>
+      <thead>
+        <tr>
+          <th>{{ tr('Driver Type', 'نوع السائق') }}</th>
+          <th>{{ tr('Contract Mode', 'وضع العقد') }}</th>
+          <th>{{ tr('Uses Qiwa', 'يستخدم قوى') }}</th>
+        </tr>
+      </thead>
       <tbody>
         {% for dtype in driver_types %}
-        <tr><td>{{ dtype.name }} <span class="text-muted small">(id {{ dtype.id }})</span></td><td>{{ (type_settings.get(dtype.id).contract_mode if type_settings.get(dtype.id) else tr('not set', 'غير محدد')) }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <h4 class="fs-6 fw-semibold text-secondary text-uppercase">{{ tr('Set Contract Mode', 'تعيين وضع العقد') }}</h4>
-  <form class="row g-2 align-items-end" method="post" action="{{ url_for('admin.save_driver_type_settings') }}">
-    {{ settings_form.hidden_tag() }}
-    <div class="col-auto"><label class="form-label">{{ tr('Driver Type ID', 'رقم نوع السائق') }}</label>{{ settings_form.driver_type_id(class_="form-control") }}</div>
-    <div class="col-auto"><label class="form-label">{{ tr('Mode', 'الوضع') }}</label>{{ settings_form.contract_mode(class_="form-select") }}</div>
-    <div class="col-auto"><button class="btn btn-primary" type="submit">{{ tr('Save', 'حفظ') }}</button></div>
-  </form>
-</div>
-
-<div class="page-header reveal">
-  <h1 class="page-title">{{ tr('Contract Templates', 'قوالب العقود') }}</h1>
-  <p class="page-subtitle">{{ tr('A template with a blank Business applies generically. A template tied to a business is used for "per business" mode types.', 'القالب بدون نشاط يُطبق بشكل عام. القالب المرتبط بنشاط يُستخدم لأنواع "لكل نشاط".') }}</p>
-</div>
-
-<div class="card reveal">
-  <div class="table-responsive">
-    <table class="table table-sm">
-      <thead><tr><th>{{ tr('Name', 'الاسم') }}</th><th>{{ tr('Business', 'النشاط') }}</th><th>{{ tr('Driver Type', 'نوع السائق') }}</th><th>{{ tr('Status', 'الحالة') }}</th><th></th></tr></thead>
-      <tbody>
-        {% for tpl in contract_templates %}
         <tr>
-          <td>{{ tpl.name }}</td>
-          <td>{{ tpl.business.name if tpl.business else tr('Generic', 'عام') }}</td>
-          <td>{{ tpl.driver_type.name if tpl.driver_type else tr('Any', 'أي') }}</td>
-          <td><span class="badge-soft {{ 'success' if tpl.is_active else 'danger' }}">{{ tr('Active', 'نشط') if tpl.is_active else tr('Inactive', 'غير نشط') }}</span></td>
-          <td class="d-flex gap-2">
-            <form method="post" action="{{ url_for('admin.toggle_contract_template', template_id=tpl.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-sm btn-outline-secondary" type="submit">{{ tr('Deactivate', 'إلغاء التفعيل') if tpl.is_active else tr('Activate', 'تفعيل') }}</button>
-            </form>
-            <form method="post" action="{{ url_for('admin.delete_contract_template', template_id=tpl.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-sm btn-outline-danger" type="submit" onclick="return confirm('{{ tr('Delete this template?', 'حذف هذا القالب؟') }}');">{{ tr('Delete', 'حذف') }}</button>
-            </form>
+          <td>{{ dtype.name }} <span class="text-muted small">(id {{ dtype.id }})</span></td>
+          <td>{{ (type_settings.get(dtype.id).contract_mode if type_settings.get(dtype.id) else tr('not set', 'غير محدد')) }}</td>
+          <td>
+            {% if type_settings.get(dtype.id) and type_settings.get(dtype.id).requires_qiwa_contract %}
+              <span class="badge-soft info">{{ tr('Yes', 'نعم') }}</span>
+            {% else %}
+              <span class="text-muted small">{{ tr('No', 'لا') }}</span>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -114,21 +99,13 @@
     </table>
   </div>
 
-  <h4 class="fs-6 fw-semibold text-secondary text-uppercase">{{ tr('Add a Contract Template', 'إضافة قالب عقد') }}</h4>
-  <form class="row g-2 align-items-end" method="post" action="{{ url_for('admin.add_contract_template') }}">
-    {{ contract_form.hidden_tag() }}
-    <div class="col-auto"><label class="form-label">{{ tr('Name', 'الاسم') }}</label>{{ contract_form.name(class_="form-control") }}</div>
-    <div class="col-auto">
-      <label class="form-label">{{ tr('Business (blank = generic)', 'النشاط (فارغ = عام)') }}</label>
-      <select name="business_id" class="form-select">
-        <option value="">— {{ tr('Generic', 'عام') }} —</option>
-        {% for b in businesses %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
-      </select>
-    </div>
-    <div class="col-auto"><label class="form-label">{{ tr('Driver Type ID (blank = any)', 'رقم نوع السائق (فارغ = أي)') }}</label>{{ contract_form.driver_type_id(class_="form-control") }}</div>
-    <div class="col-auto"><label class="form-label">{{ tr('Body', 'المحتوى') }}</label>{{ contract_form.body_content(class_="form-control") }}</div>
-    <div class="col-auto form-check">{{ contract_form.is_active(class_="form-check-input") }} <label class="form-check-label">{{ tr('Active', 'نشط') }}</label></div>
-    <div class="col-auto"><button class="btn btn-primary" type="submit">{{ tr('Add Template', 'إضافة قالب') }}</button></div>
+  <h4 class="fs-6 fw-semibold text-secondary text-uppercase">{{ tr('Set Contract Mode', 'تعيين وضع العقد') }}</h4>
+  <form class="row g-2 align-items-end" method="post" action="{{ url_for('admin.save_driver_type_settings') }}">
+    {{ settings_form.hidden_tag() }}
+    <div class="col-auto"><label class="form-label">{{ tr('Driver Type ID', 'رقم نوع السائق') }}</label>{{ settings_form.driver_type_id(class_="form-control") }}</div>
+    <div class="col-auto"><label class="form-label">{{ tr('Mode', 'الوضع') }}</label>{{ settings_form.contract_mode(class_="form-select") }}</div>
+    <div class="col-auto form-check pb-2">{{ settings_form.requires_qiwa_contract(class_="form-check-input") }}<label class="form-check-label" for="requires_qiwa_contract">{{ tr('Uses Qiwa', 'يستخدم قوى') }}</label></div>
+    <div class="col-auto"><button class="btn btn-primary" type="submit">{{ tr('Save', 'حفظ') }}</button></div>
   </form>
 </div>
 {% endblock %}

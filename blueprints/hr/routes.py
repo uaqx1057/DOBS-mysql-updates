@@ -1,17 +1,16 @@
 # blueprints/hr/routes.py
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, current_app
 from flask_login import login_required, current_user
-from models import Driver, User, Offboarding
+from models import Driver, User, Offboarding, DriverTypeSettings, DriverDocument, SharedGeneratedDriverContract
 from extensions import db, mail, csrf
 from services.hr_service import process_hr_approval, save_transfer_proof, send_rejection_email
-from utils.auth import require_roles
+from services.rbac import require_permission, user_can_access_dashboard, user_has_permission
 from flask_mail import Message
 from datetime import datetime
 import os
 import sqlalchemy as sa
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
-from services.hr_service import process_hr_approval, save_transfer_proof, send_rejection_email
 from sqlalchemy.exc import IntegrityError
 
 hr_bp = Blueprint("hr", __name__, url_prefix='/hr')
@@ -29,10 +28,59 @@ def _allowed_filename(fn):
     _, ext = os.path.splitext(fn.lower())
     return ext in ALLOWED_EXT
 
+
+def _qiwa_required(driver: Driver) -> bool:
+    settings = DriverTypeSettings.query.get(driver.driver_type_id)
+    return bool(settings and settings.requires_qiwa_contract)
+
+
+def _static_upload_url(relative_path: str | None) -> str:
+    if not relative_path:
+        return ""
+    return url_for("static", filename=f"uploads/{relative_path}")
+
+
+def _generated_contract_links(driver: Driver) -> list[dict]:
+    rows = (
+        SharedGeneratedDriverContract.query
+        .filter_by(driver_id=driver.id)
+        .order_by(SharedGeneratedDriverContract.generated_at.desc(), SharedGeneratedDriverContract.id.desc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "reference_number": row.reference_number,
+            "name": row.original_name or row.reference_number,
+            "url": _static_upload_url(row.file_path),
+            "business": row.business.name if row.business else "Generic",
+            "generated_at": row.generated_at.isoformat() if row.generated_at else None,
+        }
+        for row in rows
+    ]
+
+
+def _generated_promissory_link(driver: Driver) -> dict | None:
+    note = (
+        DriverDocument.query
+        .filter_by(driver_id=driver.id, document_type="other", notes="PromissoryNote")
+        .order_by(DriverDocument.created_at.desc(), DriverDocument.id.desc())
+        .first()
+    )
+    if not note:
+        return None
+    return {
+        "id": note.id,
+        "name": note.original_name or note.notes or "Promissory Note",
+        "url": _static_upload_url(note.file_path),
+        "generated_at": note.created_at.isoformat() if note.created_at else None,
+    }
+
 def _serialize_driver(d): 
     return {
         "id": d.id,
         "driver_id": d.driver_id,
+        "driver_type_id": d.driver_type_id,
         "name": d.name,
         "iqaama_number": d.iqaama_number,
         "iqaama_expiry": d.iqaama_expiry.isoformat() if d.iqaama_expiry else None,
@@ -47,6 +95,7 @@ def _serialize_driver(d):
         "issued_device_id": d.issued_device_id,
         "mobile_issued": bool(d.mobile_issued),
         "iqama_card_upload": d.iqama_card_upload,
+        "qiwa_required": _qiwa_required(d),
         "qiwa_contract_created": bool(d.qiwa_contract_created),
         "company_contract_created": bool(d.company_contract_created),
         "qiwa_contract_status": d.qiwa_contract_status,
@@ -66,7 +115,9 @@ def _serialize_driver(d):
         "onboarding_stage": d.onboarding_stage,
         "company_contract_file": d.company_contract_file,
         "promissory_note_file": d.promissory_note_file,
-        "qiwa_contract_file": d.qiwa_contract_file
+        "qiwa_contract_file": d.qiwa_contract_file,
+        "generated_contracts": _generated_contract_links(d),
+        "generated_promissory_note": _generated_promissory_link(d),
     }
 
 
@@ -142,6 +193,12 @@ def _serialize_offboarding(o):
         "fleet_damage_report": getattr(o, "fleet_damage_report", "") or "",
         "fleet_damage_cost": float(getattr(o, "fleet_damage_cost", 0) or 0),
         "salary_paid": bool(o.salary_paid),
+        "dms_salary_balance": float(getattr(o, "dms_salary_balance", 0) or 0),
+        "net_settlement_amount": float(getattr(o, "net_settlement_amount", 0) or 0),
+        "settlement_direction": getattr(o, "settlement_direction", None) or "even",
+        "promissory_note_issued": bool(getattr(o, "promissory_note_issued", False)),
+        "payment_letter_issued": bool(getattr(o, "payment_letter_issued", False)),
+        "payment_letter_due_days": getattr(o, "payment_letter_due_days", None),
     }
 
  
@@ -150,8 +207,11 @@ def _serialize_offboarding(o):
 # -------------------------
 @hr_bp.route("/dashboard")
 @login_required
-@require_roles("HR")
 def dashboard_hr():
+    if not user_can_access_dashboard(current_user, "hr.dashboard_hr"):
+        flash("Access denied. HR role required.", "danger")
+        return redirect(url_for("auth.login"))
+
     q = (request.args.get("q") or "").strip()
 
     all_drivers_query = Driver.query.filter(
@@ -186,6 +246,9 @@ def dashboard_hr():
     total_completed_offboarded = len(completed_offboarded)
 
     drivers_data = [_serialize_driver(d) for d in all_drivers if d.id not in offboarding_driver_ids]
+    qiwa_driver_type_ids = [
+        row.driver_type_id for row in DriverTypeSettings.query.filter_by(requires_qiwa_contract=True).all()
+    ]
     offboardings_query = Offboarding.query.filter(Offboarding.status.in_(["HR", "Completed"]))
     if q:
         pattern = f"%{q}%"
@@ -209,20 +272,74 @@ def dashboard_hr():
         total_pending_onboarded=total_pending_onboarded,
         total_completed_offboarded=total_completed_offboarded,
         q=q,
+        can_approve_onboarding=user_has_permission(current_user, "onboarding.hr.approve"),
+        can_complete_transfer=user_has_permission(current_user, "onboarding.hr_final.complete"),
+        can_finalize_offboarding=user_has_permission(current_user, "offboarding.hr.finalize"),
+        qiwa_driver_type_ids=qiwa_driver_type_ids,
     )
 
- 
+
 
 # -------------------------
 # Approve Driver & Upload Contracts
 # -------------------------
+@hr_bp.route("/generate_contract_pack/<int:driver_id>", methods=["POST"])
+@login_required
+@require_permission("onboarding.hr.approve")
+def generate_contract_pack(driver_id):
+    driver = Driver.query.get_or_404(driver_id)
+
+    if driver.onboarding_stage != "HR":
+        flash(f"Driver is not in HR stage (current: {driver.onboarding_stage}).", "warning")
+        return redirect(url_for("hr.dashboard_hr"))
+
+    try:
+        from services import contracts
+        contracts.generate_driver_contracts(driver, uploaded_by_id=current_user.id)
+        contracts.generate_promissory_note(driver, uploaded_by_id=current_user.id)
+        db.session.commit()
+        flash(f"Contract pack generated for {driver.name}. Print the PDFs, collect signatures, then upload signed copies in Step 2.", "success")
+    except contracts.ContractTemplateMissingError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("HR contract pack generation failed for driver_id=%s", driver.id)
+        flash(f"Error generating contract pack: {exc}", "danger")
+
+    return redirect(url_for("hr.dashboard_hr"))
+
+
 @hr_bp.route("/approve_driver/<int:driver_id>", methods=["POST"])
 @login_required
-@require_roles("HR")
+@require_permission("onboarding.hr.approve")
 def approve_driver(driver_id):
     driver = Driver.query.get_or_404(driver_id)
+
+    if driver.onboarding_stage != "HR":
+        flash(f"Driver is not in HR stage (current: {driver.onboarding_stage}).", "warning")
+        return redirect(url_for("hr.dashboard_hr"))
+
     files = request.files
     max_bytes = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
+    qiwa_required = _qiwa_required(driver)
+
+    if not _generated_contract_links(driver) or not _generated_promissory_link(driver):
+        flash("Generate the contract pack first, print it, collect signatures, then upload signed copies in Step 2.", "danger")
+        return redirect(url_for("hr.dashboard_hr"))
+
+    required_files = {
+        "company_contract_file": "Company contract signed copy",
+        "promissory_note_file": "Promissory note signed copy",
+    }
+    if qiwa_required:
+        required_files["qiwa_contract_file"] = "Qiwa contract signed copy"
+
+    for field_name, label in required_files.items():
+        uploaded_file = files.get(field_name)
+        if not uploaded_file or not uploaded_file.filename:
+            flash(f"{label} is required before HR can approve this driver.", "danger")
+            return redirect(url_for("hr.dashboard_hr"))
 
     try:
         process_hr_approval(driver, files, request.form, _upload_root(), max_bytes, db=db, uploaded_by_id=current_user.id)
@@ -297,10 +414,18 @@ def approve_driver(driver_id):
 
 @hr_bp.route("/reject_driver/<int:driver_id>", methods=["POST"])
 @login_required
-@require_roles("HR")
+@require_permission("onboarding.hr.approve")
 def reject_driver(driver_id):
 
     driver = Driver.query.get_or_404(driver_id)
+
+    # Rejection is only available on HR's first pass at a driver - once
+    # they've moved past HR, platform IDs/contracts are already in motion
+    # and unwinding that goes through offboarding, not a simple reject.
+    if driver.onboarding_stage != "HR":
+        flash(f"Driver is not in HR stage (current: {driver.onboarding_stage}).", "warning")
+        return redirect(url_for("hr.dashboard_hr"))
+
     reason = request.form.get("rejection_reason", "").strip()
 
     if not reason:
@@ -312,8 +437,12 @@ def reject_driver(driver_id):
     nationality = driver.nationality
 
     try:
-        # Delete driver permanently
-        db.session.delete(driver)
+        # Soft-reject: preserve the record (audit trail, consistent with
+        # Ops Manager's reject) instead of deleting it outright.
+        driver.onboarding_stage = "Rejected"
+        driver.rejected_by_stage = "HR"
+        driver.rejected_at = datetime.utcnow()
+        driver.reject_reason = reason
         db.session.commit()
         current_app.logger.info(
             "hr_reject_driver",
@@ -339,7 +468,7 @@ def reject_driver(driver_id):
             current_user.name,
         )
 
-        flash(f"Driver {driver_name} rejected and deleted. Notifications sent.", "success")
+        flash(f"Driver {driver_name} rejected. Notifications sent.", "success")
 
     except Exception as e:
         db.session.rollback()
@@ -354,10 +483,14 @@ def reject_driver(driver_id):
 # -------------------------
 @hr_bp.route("/complete_transfer/<int:driver_id>", methods=["POST"])
 @login_required
-@require_roles("HR")
+@require_permission("onboarding.hr_final.complete")
 def complete_sponsorship_transfer(driver_id):
 
     driver = Driver.query.get_or_404(driver_id)
+
+    if driver.onboarding_stage != "HR Final":
+        flash(f"Driver is not in HR Final stage (current: {driver.onboarding_stage}).", "warning")
+        return redirect(url_for("hr.dashboard_hr"))
 
     try:
         completed_at = datetime.utcnow()
@@ -483,12 +616,13 @@ def complete_sponsorship_transfer(driver_id):
 
 @hr_bp.route('/complete_driver/<int:driver_id>', methods=['POST'])
 @login_required
+@require_permission("onboarding.hr_final.complete")
 def complete_driver(driver_id):
-    if current_user.role != "HR":
-        flash("Access denied", "danger")
-        return redirect(url_for("auth.login"))
-
     driver = Driver.query.get_or_404(driver_id)
+
+    if driver.onboarding_stage != "HR Final":
+        flash(f"Driver is not in HR Final stage (current: {driver.onboarding_stage}).", "warning")
+        return redirect(url_for("hr.dashboard_hr"))
 
     # Only for drivers without a Qiwa contract
     if not driver.qiwa_contract_created:
@@ -567,13 +701,8 @@ def start_offboarding(driver_id):
 
 @hr_bp.route("/offboarding/finalize", methods=["POST"])
 @login_required
+@require_permission("offboarding.hr.finalize")
 def finalize_offboarding():
-    if current_user.role != "HR":
-        if request.is_json:
-            return jsonify({"success": False, "message": "Access denied"}), 403
-        flash("Access denied", "danger")
-        return redirect(url_for("auth.login"))
-
     # Determine if request is JSON or form
     if request.is_json:
         data = request.get_json()
@@ -581,23 +710,60 @@ def finalize_offboarding():
         company_cancelled = data.get("company_contract_cancelled") == "yes"
         qiwa_cancelled = data.get("qiwa_contract_cancelled") == "yes"
         salary_paid = data.get("salary_paid") == "yes"
+        promissory_note_issued = data.get("promissory_note_issued") == "yes"
+        payment_letter_issued = data.get("payment_letter_issued") == "yes"
+        payment_letter_due_days = data.get("payment_letter_due_days")
     else:
         offboarding_id = request.form.get("offboarding_id")
         company_cancelled = request.form.get("company_contract_cancelled") == "yes"
         qiwa_cancelled = request.form.get("qiwa_contract_cancelled") == "yes"
         salary_paid = request.form.get("salary_paid") == "yes"
+        promissory_note_issued = request.form.get("promissory_note_issued") == "yes"
+        payment_letter_issued = request.form.get("payment_letter_issued") == "yes"
+        payment_letter_due_days = request.form.get("payment_letter_due_days")
 
     # Fetch Offboarding record
     offboarding = Offboarding.query.get_or_404(offboarding_id)
+
+    if offboarding.status != "HR":
+        message = f"Offboarding is not in HR stage (current: {offboarding.status})."
+        if request.is_json:
+            return jsonify({"success": False, "message": message}), 400
+        flash(message, "warning")
+        return redirect(url_for("hr.dashboard_hr"))
 
     # Update fields
     offboarding.company_contract_cancelled = company_cancelled
     offboarding.qiwa_contract_cancelled = qiwa_cancelled
     offboarding.salary_paid = salary_paid
 
+    # The settlement direction was computed by Finance (dms payroll balance
+    # combined with Ops Supervisor's penalty and Fleet's damage cost) - HR's
+    # resolution requirement depends on which way the money flows.
+    direction = offboarding.settlement_direction or "even"
+    settlement_resolved = True
+    due_days_int = None
+
+    if direction == "company_owes_driver":
+        if payment_letter_issued:
+            try:
+                due_days_int = int(payment_letter_due_days)
+                settlement_resolved = due_days_int > 0
+            except (TypeError, ValueError):
+                settlement_resolved = False
+        else:
+            settlement_resolved = salary_paid
+    elif direction == "driver_owes_company":
+        settlement_resolved = salary_paid or promissory_note_issued
+
     # Constraint check
-    if not (company_cancelled and qiwa_cancelled and salary_paid):
-        message = "Cannot clear: Company & Qiwa contracts must be cancelled and salary must be paid."
+    if not (company_cancelled and qiwa_cancelled and settlement_resolved):
+        if direction == "company_owes_driver" and not settlement_resolved:
+            message = "Cannot clear: confirm the driver has been paid, or issue a payment letter with a valid number of days."
+        elif direction == "driver_owes_company" and not settlement_resolved:
+            message = "Cannot clear: confirm the driver has paid, or issue a promissory note."
+        else:
+            message = "Cannot clear: Company & Qiwa contracts must be cancelled."
         if request.is_json:
             return jsonify({"success": False, "message": message}), 400
         flash(message, "danger")
@@ -609,10 +775,28 @@ def finalize_offboarding():
     offboarding.status = "Completed"
 
     try:
-        from services import contracts
+        from services import contracts, dms_payroll
+
+        if direction == "driver_owes_company" and promissory_note_issued and not salary_paid:
+            offboarding.promissory_note_issued = True
+            offboarding.promissory_note_at = datetime.utcnow()
+            contracts.generate_offboarding_promissory_note(offboarding, uploaded_by_id=current_user.id)
+
+        if direction == "company_owes_driver" and payment_letter_issued and not salary_paid:
+            offboarding.payment_letter_issued = True
+            offboarding.payment_letter_due_days = due_days_int
+            offboarding.payment_letter_at = datetime.utcnow()
+            contracts.generate_payment_letter(offboarding, due_days_int, uploaded_by_id=current_user.id)
+
         contracts.generate_final_settlement(offboarding, uploaded_by_id=current_user.id)
+
+        # Settlement is confirmed complete (paid, either direction) once
+        # HR finalizes with an actual payment (not a letter/note promising
+        # future payment) - only then close the DMS slip out to match.
+        if direction != "even" and salary_paid:
+            dms_payroll.mark_salary_slip_settled(offboarding.dms_salary_slip_id)
     except Exception:
-        current_app.logger.exception("Final settlement generation failed for offboarding_id=%s", offboarding.id)
+        current_app.logger.exception("Settlement document generation failed for offboarding_id=%s", offboarding.id)
 
     db.session.commit()
 

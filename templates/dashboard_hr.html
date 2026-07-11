@@ -50,8 +50,10 @@
           <h3 class="mb-1">{{ o.name }}</h3>
           <p class="mb-0 text-secondary">{{ tr('Iqama', 'الإقامة') }}: {{ o.iqaama_number }} &middot; {{ tr('Status', 'الحالة') }}: {{ o.status }}</p>
         </div>
-        {% if o.status == 'HR' %}
+        {% if o.status == 'HR' and can_finalize_offboarding %}
         <button type="button" class="btn btn-primary btn-sm" data-finalize-offboarding="{{ o.offboarding_id }}">{{ tr('Finalize Offboarding', 'إنهاء الخروج') }}</button>
+        {% elif o.status == 'HR' %}
+        <span class="badge-soft neutral">{{ tr('View only', 'عرض فقط') }}</span>
         {% else %}
         <span class="badge-soft success">{{ tr('Completed', 'مكتمل') }}</span>
         {% endif %}
@@ -65,25 +67,56 @@
 
 <!-- ===================== HR approval modal (HR stage) ===================== -->
 <div class="modal" id="hrApproveModal">
-  <div class="modal-content" style="max-width:640px;">
+  <div class="modal-content" style="max-width:760px;">
     <div class="modal-header"><h3 id="hrApproveTitle">{{ tr('HR Review', 'مراجعة الموارد البشرية') }}</h3><button class="modal-close" data-modal-close>&times;</button></div>
+    <div class="modal-body" style="border-bottom:1px solid var(--border-color);">
+      <div class="mb-3 p-3" style="border:1px solid var(--border-color); border-radius:var(--radius-md); background:var(--bg-subtle);">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+          <div>
+            <div class="fw-semibold">{{ tr('Step 1: Generate and print contract pack', 'الخطوة 1: إنشاء وطباعة حزمة العقود') }}</div>
+            <div class="text-secondary small">{{ tr('Generate the system contract and promissory note, print them, and collect the driver signature before continuing.', 'قم بإنشاء عقد النظام والسند الإذني وطباعتهما ثم أخذ توقيع السائق قبل المتابعة.') }}</div>
+          </div>
+          {% if can_approve_onboarding %}
+          <form id="hrGenerateContractsForm" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary btn-sm">{{ tr('Generate Contract Pack', 'إنشاء حزمة العقود') }}</button>
+          </form>
+          {% endif %}
+        </div>
+        <div id="generatedContractsList" class="mt-3 small text-secondary"></div>
+      </div>
+
+      <div class="p-3" style="border:1px solid var(--border-color); border-radius:var(--radius-md);">
+        <div class="fw-semibold mb-1">{{ tr('Step 2: Upload signed hardcopy documents', 'الخطوة 2: رفع المستندات الموقعة') }}</div>
+        <div class="text-secondary small">{{ tr('Upload the signed company contract and signed promissory note. Qiwa appears only for sponsored drivers.', 'ارفع عقد الشركة الموقع والسند الإذني الموقع. يظهر عقد قوى فقط للسائقين المكفولين.') }}</div>
+      </div>
+    </div>
     <form id="hrApproveForm" method="POST" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="modal-body">
-        <label class="form-label">{{ tr('Company Contract File', 'ملف عقد الشركة') }}</label><input type="file" class="form-control mb-3" name="company_contract_file" accept=".jpg,.jpeg,.png,.pdf">
-        <label class="form-label">{{ tr('Promissory Note File', 'ملف السند الإذني') }}</label><input type="file" class="form-control mb-3" name="promissory_note_file" accept=".jpg,.jpeg,.png,.pdf">
-        <label class="form-label">{{ tr('Qiwa Contract File', 'ملف عقد قوى') }}</label><input type="file" class="form-control mb-3" name="qiwa_contract_file" accept=".jpg,.jpeg,.png,.pdf">
-        <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="qiwa_contract_created" value="1" id="qiwaCreated"><label class="form-check-label" for="qiwaCreated">{{ tr('Qiwa Contract Created', 'تم إنشاء عقد قوى') }}</label></div>
-        <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="company_contract_created" value="1" id="companyCreated"><label class="form-check-label" for="companyCreated">{{ tr('Company Contract Created', 'تم إنشاء عقد الشركة') }}</label></div>
-        <label class="form-label">{{ tr('Qiwa Contract Status', 'حالة عقد قوى') }}</label>
-        <select class="form-select mb-3" name="qiwa_contract_status"><option value="Pending">{{ tr('Pending', 'معلق') }}</option><option value="Created">{{ tr('Created', 'تم الإنشاء') }}</option><option value="Approved">{{ tr('Approved', 'موافق عليه') }}</option><option value="Rejected">{{ tr('Rejected', 'مرفوض') }}</option></select>
-        <label class="form-label">{{ tr('Sponsorship Transfer Status', 'حالة نقل الكفالة') }}</label>
-        <select class="form-select" name="sponsorship_transfer_status"><option value="Pending">{{ tr('Pending', 'معلق') }}</option><option value="Transferred">{{ tr('Transferred', 'تم النقل') }}</option><option value="Completed">{{ tr('Completed', 'مكتمل') }}</option><option value="Not Required">{{ tr('Not Required', 'غير مطلوب') }}</option></select>
+        <label class="form-label">{{ tr('Signed Company Contract File', 'ملف عقد الشركة الموقع') }}</label><input type="file" class="form-control mb-3" name="company_contract_file" accept=".jpg,.jpeg,.png,.pdf" required>
+        <label class="form-label">{{ tr('Signed Promissory Note File', 'ملف السند الإذني الموقع') }}</label><input type="file" class="form-control mb-3" name="promissory_note_file" accept=".jpg,.jpeg,.png,.pdf" required>
+        <div id="qiwaFieldsGroup">
+          <label class="form-label">{{ tr('Signed Qiwa Contract File', 'ملف عقد قوى الموقع') }}</label><input type="file" class="form-control mb-3" name="qiwa_contract_file" accept=".jpg,.jpeg,.png,.pdf">
+          <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="qiwa_contract_created" value="1" id="qiwaCreated"><label class="form-check-label" for="qiwaCreated">{{ tr('Qiwa Contract Created', 'تم إنشاء عقد قوى') }}</label></div>
+          <label class="form-label">{{ tr('Qiwa Contract Status', 'حالة عقد قوى') }}</label>
+          <select class="form-select mb-3" name="qiwa_contract_status"><option value="Pending">{{ tr('Pending', 'معلق') }}</option><option value="Created">{{ tr('Created', 'تم الإنشاء') }}</option><option value="Approved">{{ tr('Approved', 'موافق عليه') }}</option><option value="Rejected">{{ tr('Rejected', 'مرفوض') }}</option></select>
+        </div>
+        <p id="qiwaNotApplicable" class="text-secondary small mb-3" style="display:none;">{{ tr('Qiwa contracts only apply to Sponsor-type drivers.', 'عقود قوى تنطبق فقط على السائقين من نوع الكفيل.') }}</p>
+        <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="company_contract_created" value="1" id="companyCreated" checked><label class="form-check-label" for="companyCreated">{{ tr('Company Contract Signed / Uploaded', 'تم توقيع / رفع عقد الشركة') }}</label></div>
+        <label class="form-label">{{ tr('Other HR Documents (optional)', 'مستندات الموارد البشرية الأخرى (اختياري)') }}</label><input type="file" class="form-control mb-3" name="other_document_files" accept=".jpg,.jpeg,.png,.pdf" multiple>
+        <div id="sponsorshipTransferGroup">
+          <label class="form-label">{{ tr('Sponsorship Transfer Status', 'حالة نقل الكفالة') }}</label>
+          <select class="form-select" name="sponsorship_transfer_status"><option value="Pending">{{ tr('Pending', 'معلق') }}</option><option value="Transferred">{{ tr('Transferred', 'تم النقل') }}</option><option value="Completed">{{ tr('Completed', 'مكتمل') }}</option><option value="Not Required">{{ tr('Not Required', 'غير مطلوب') }}</option></select>
+        </div>
+        <p id="sponsorshipNotApplicable" class="text-secondary small mb-0" style="display:none;">{{ tr('Sponsorship transfer is not required for this driver type.', 'نقل الكفالة غير مطلوب لهذا النوع من السائقين.') }}</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
+        {% if can_approve_onboarding %}
         <button type="button" class="btn btn-danger" id="hrRejectBtn">{{ tr('Reject', 'رفض') }}</button>
         <button type="submit" class="btn btn-primary">{{ tr('Approve & Continue', 'الموافقة والمتابعة') }}</button>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -108,7 +141,9 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
+        {% if can_complete_transfer %}
         <button type="submit" class="btn btn-primary">{{ tr('Complete', 'إنهاء') }}</button>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -141,8 +176,25 @@
       <input type="hidden" name="offboarding_id" id="finalizeOffId">
       <div class="modal-body">
         <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="company_contract_cancelled" value="yes" id="fCompany"><label class="form-check-label" for="fCompany">{{ tr('Company Contract Cancelled', 'تم إلغاء عقد الشركة') }}</label></div>
-        <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="qiwa_contract_cancelled" value="yes" id="fQiwa"><label class="form-check-label" for="fQiwa">{{ tr('Qiwa Contract Cancelled', 'تم إلغاء عقد قوى') }}</label></div>
-        <div class="form-check"><input class="form-check-input" type="checkbox" name="salary_paid" value="yes" id="fSalary"><label class="form-check-label" for="fSalary">{{ tr('Salary Paid', 'تم دفع الراتب') }}</label></div>
+        <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="qiwa_contract_cancelled" value="yes" id="fQiwa"><label class="form-check-label" for="fQiwa">{{ tr('Qiwa Contract Cancelled', 'تم إلغاء عقد قوى') }}</label></div>
+
+        <div id="fSettlementSummary" class="mb-3 p-2" style="border-radius:var(--radius-md); background:var(--bg-subtle);"></div>
+
+        <div id="fCompanyOwesDriver" style="display:none;">
+          <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="salary_paid" value="yes" id="fSalaryPaidToDriver"><label class="form-check-label" for="fSalaryPaidToDriver">{{ tr('Settlement Paid to Driver', 'تم دفع التسوية للسائق') }}</label></div>
+          <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="payment_letter_issued" value="yes" id="fPaymentLetter"><label class="form-check-label" for="fPaymentLetter">{{ tr('Not paid yet — issue Payment Letter instead', 'لم يُدفع بعد — إصدار خطاب دفع بدلاً من ذلك') }}</label></div>
+          <div class="mb-2" style="padding-inline-start:1.5rem;">
+            <label class="form-label small">{{ tr('Pay within (days)', 'الدفع خلال (أيام)') }}</label>
+            <input type="number" min="1" class="form-control form-control-sm" style="max-width:120px;" name="payment_letter_due_days" id="fPaymentLetterDays">
+          </div>
+        </div>
+
+        <div id="fDriverOwesCompany" style="display:none;">
+          <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="salary_paid" value="yes" id="fSalaryPaidByDriver"><label class="form-check-label" for="fSalaryPaidByDriver">{{ tr('Driver Has Paid Company', 'دفع السائق للشركة') }}</label></div>
+          <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="promissory_note_issued" value="yes" id="fPromissoryNote"><label class="form-check-label" for="fPromissoryNote">{{ tr('Cannot pay now — issue Promissory Note instead', 'لا يمكن الدفع الآن — إصدار سند إذني بدلاً من ذلك') }}</label></div>
+        </div>
+
+        <div id="fEvenSettlement" class="text-secondary small" style="display:none;">{{ tr('No outstanding balance either way — nothing further required here.', 'لا يوجد رصيد مستحق بأي اتجاه — لا حاجة لأي إجراء إضافي.') }}</div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
@@ -176,14 +228,41 @@
 <script>
 (function () {
   var currentDriverId = null;
+  var qiwaDriverTypeIds = {{ qiwa_driver_type_ids | tojson }};
+
+  function escapeHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, function (ch) {
+      return ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[ch];
+    });
+  }
 
   document.querySelectorAll('#driversCards .driver-card').forEach(function (card) {
     card.addEventListener('click', function () {
       var d = JSON.parse(card.dataset.driver || '{}');
       currentDriverId = d.id;
       if (card.dataset.stage === 'HR') {
+        var qiwaApplies = !!d.qiwa_required || qiwaDriverTypeIds.indexOf(d.driver_type_id) !== -1;
+        document.getElementById('qiwaFieldsGroup').style.display = qiwaApplies ? '' : 'none';
+        document.getElementById('qiwaNotApplicable').style.display = qiwaApplies ? 'none' : '';
+        var qiwaFileInput = document.querySelector('#qiwaFieldsGroup input[name="qiwa_contract_file"]');
+        var qiwaCreatedInput = document.getElementById('qiwaCreated');
+        var sponsorshipGroup = document.getElementById('sponsorshipTransferGroup');
+        var sponsorshipNotApplicable = document.getElementById('sponsorshipNotApplicable');
+        var sponsorshipSelect = document.querySelector('select[name="sponsorship_transfer_status"]');
+        if (qiwaFileInput) qiwaFileInput.required = qiwaApplies;
+        if (qiwaCreatedInput) {
+          qiwaCreatedInput.checked = qiwaApplies ? !!d.qiwa_contract_created : false;
+          qiwaCreatedInput.required = qiwaApplies;
+        }
+        if (sponsorshipGroup) sponsorshipGroup.style.display = qiwaApplies ? '' : 'none';
+        if (sponsorshipNotApplicable) sponsorshipNotApplicable.style.display = qiwaApplies ? 'none' : '';
+        if (sponsorshipSelect && !qiwaApplies) sponsorshipSelect.value = 'Not Required';
+        document.getElementById('companyCreated').checked = true;
         document.getElementById('hrApproveTitle').textContent = ({{ tr('HR Review', 'مراجعة الموارد البشرية') | tojson }}) + ' — ' + d.name;
+        var generateForm = document.getElementById('hrGenerateContractsForm');
+        if (generateForm) generateForm.action = '/dashboard/hr/generate_contract_pack/' + d.id;
         document.getElementById('hrApproveForm').action = '/dashboard/hr/approve_driver/' + d.id;
+        renderGeneratedContracts(d);
         DobsUI.openModal('hrApproveModal');
       } else if (card.dataset.stage === 'HR Final') {
         var withQiwa = !!d.qiwa_contract_created;
@@ -195,17 +274,63 @@
     });
   });
 
-  document.getElementById('hrRejectBtn').addEventListener('click', function () {
-    if (!currentDriverId) return;
-    DobsUI.closeModal('hrApproveModal');
-    document.getElementById('hrRejectForm').action = '/dashboard/hr/reject_driver/' + currentDriverId;
-    DobsUI.openModal('hrRejectModal');
-  });
+  var hrRejectBtn = document.getElementById('hrRejectBtn');
+  if (hrRejectBtn) {
+    hrRejectBtn.addEventListener('click', function () {
+      if (!currentDriverId) return;
+      DobsUI.closeModal('hrApproveModal');
+      document.getElementById('hrRejectForm').action = '/dashboard/hr/reject_driver/' + currentDriverId;
+      DobsUI.openModal('hrRejectModal');
+    });
+  }
+
+  function renderGeneratedContracts(driver) {
+    var el = document.getElementById('generatedContractsList');
+    if (!el) return;
+
+    var contracts = driver.generated_contracts || [];
+    var promissory = driver.generated_promissory_note || null;
+    var items = [];
+
+    contracts.forEach(function (doc) {
+      items.push('<li><a href="' + doc.url + '" target="_blank" rel="noopener">' + escapeHtml(doc.name || doc.reference_number || 'Driver Contract') + '</a> <span class="text-muted">(' + escapeHtml(doc.business || 'Generic') + ')</span></li>');
+    });
+    if (promissory) {
+      items.push('<li><a href="' + promissory.url + '" target="_blank" rel="noopener">' + escapeHtml(promissory.name || 'Promissory Note') + '</a></li>');
+    }
+
+    if (!items.length) {
+      el.innerHTML = '<div class="text-muted">{{ tr("No generated contract pack yet. Click Generate Contract Pack first.", "لم يتم إنشاء حزمة العقود بعد. اضغط إنشاء حزمة العقود أولاً.") }}</div>';
+      return;
+    }
+
+    el.innerHTML = '<div class="fw-semibold mb-1">{{ tr("Generated PDFs ready for print:", "ملفات PDF الجاهزة للطباعة:") }}</div><ul class="mb-0">' + items.join('') + '</ul>';
+  }
 
   document.querySelectorAll('[data-finalize-offboarding]').forEach(function (btn) {
     btn.addEventListener('click', function () {
+      var card = btn.closest('[data-off]');
+      var o = card ? JSON.parse(card.dataset.off || '{}') : {};
+      var direction = o.settlement_direction || 'even';
+      var amount = Math.abs(o.net_settlement_amount || 0).toFixed(2);
+
       document.getElementById('finalizeOffId').value = btn.getAttribute('data-finalize-offboarding');
       document.getElementById('finalizeOffForm').action = "{{ url_for('hr.finalize_offboarding') }}";
+      document.getElementById('finalizeOffForm').reset();
+
+      document.getElementById('fCompanyOwesDriver').style.display = direction === 'company_owes_driver' ? '' : 'none';
+      document.getElementById('fDriverOwesCompany').style.display = direction === 'driver_owes_company' ? '' : 'none';
+      document.getElementById('fEvenSettlement').style.display = direction === 'even' ? '' : 'none';
+
+      var summaryEl = document.getElementById('fSettlementSummary');
+      if (direction === 'company_owes_driver') {
+        summaryEl.innerHTML = '<strong>{{ tr("Net Settlement", "صافي التسوية") }}:</strong> ' + amount + ' SAR — {{ tr("company owes driver", "الشركة مدينة للسائق") }}';
+      } else if (direction === 'driver_owes_company') {
+        summaryEl.innerHTML = '<strong>{{ tr("Net Settlement", "صافي التسوية") }}:</strong> ' + amount + ' SAR — {{ tr("driver owes company", "السائق مدين للشركة") }}';
+      } else {
+        summaryEl.innerHTML = '<strong>{{ tr("Net Settlement", "صافي التسوية") }}:</strong> 0.00 SAR';
+      }
+
       DobsUI.openModal('finalizeOffModal');
     });
   });

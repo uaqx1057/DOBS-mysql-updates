@@ -1,12 +1,13 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session , current_app, jsonify
-from flask_login import login_required, current_user
+from flask import Flask, render_template, request, redirect, url_for, flash, session , current_app, jsonify, send_file
+from flask_login import login_required, current_user, login_user
 from models import (
     Business, DriverBusinessIDS, Offboarding, db, Driver, User, BusinessID, BusinessDriver,
-    DriverType, OnboardingStageTemplate, DriverTypeSettings, ContractTemplate, Branch,
+    DriverType, OnboardingStageTemplate, DriverTypeSettings, ContractTemplate, CompanyPreset, Branch,
 )
 from extensions import db, mail, limiter
 from flask_mail import Message
 from datetime import datetime
+from io import BytesIO
 import os
 from utils.email_utils import send_password_change_email
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -21,17 +22,24 @@ from services.admin_service import (
 )
 from forms.common import (
     CSRFOnlyForm, AddUserForm, AddDriverForm, ChangePasswordForm, EditUserForm,
-    OnboardingStageTemplateForm, DriverTypeSettingsForm, ContractTemplateForm, RoleForm,
+    OnboardingStageTemplateForm, DriverTypeSettingsForm, ContractTemplateForm, PromissoryNoteTemplateForm,
+    CompanyPresetForm, RoleForm,
+    DASHBOARD_ENDPOINT_CHOICES,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_
 from utils.auth import require_roles_or_owner
 from utils.cache import ttl_cache
-from models import Role, Permission, UserRole, UserPermission
+from models import Role, Permission, RolePermission, UserRole, UserPermission
 from services.rbac import (
     grant_role, revoke_role, set_permission_override, clear_permission_override,
-    role_permission_codes, set_role_permissions,
+    role_permission_codes, set_role_permissions, user_can_access_dashboard,
+    require_permission, user_has_permission,
 )
+from services import impersonation
+from services.impersonation import ImpersonationError
+from services.contracts import render_contract_template_preview
+from blueprints.auth.routes import _post_login_redirect
 from . import admin_bp
 
 UPLOAD_FOLDER = "static/uploads"
@@ -99,15 +107,216 @@ def normalize_onboarding_stage(value):
         return "Fleet Manager"
     return text
 
+
+def _fill_contract_template_from_form(template, form):
+    template.name = form.name.data
+    template.business_id = form.business_id.data or None
+    template.driver_type_id = form.driver_type_id.data or None
+    template.document_kind = "driver_contract"
+    template.first_party_name = form.first_party_name.data or None
+    template.first_party_name_ar = form.first_party_name_ar.data or None
+    template.first_party_label = form.first_party_label.data or None
+    template.first_party_label_ar = form.first_party_label_ar.data or None
+    template.second_party_label = form.second_party_label.data or None
+    template.second_party_label_ar = form.second_party_label_ar.data or None
+    template.intro_content = form.intro_content.data or None
+    template.intro_content_ar = form.intro_content_ar.data or None
+    template.body_content = form.body_content.data
+    template.body_content_ar = form.body_content_ar.data or None
+    template.eligibility_content = form.eligibility_content.data or None
+    template.eligibility_content_ar = form.eligibility_content_ar.data or None
+    template.general_terms_content = form.general_terms_content.data or None
+    template.general_terms_content_ar = form.general_terms_content_ar.data or None
+    template.target_orders = form.target_orders.data or None
+    template.target_salary = form.target_salary.data or None
+    template.bonus_per_extra_order = form.bonus_per_extra_order.data or None
+    template.deduction_per_missing_order = form.deduction_per_missing_order.data or None
+    template.calculation_tiers_json = form.calculation_tiers_json.data or None
+    template.company_signatory_name = form.company_signatory_name.data or None
+    template.company_signatory_title = form.company_signatory_title.data or None
+    template.signature_notes = form.signature_notes.data or None
+    template.signature_notes_ar = form.signature_notes_ar.data or None
+    template.is_active = form.is_active.data
+    return template
+
+
+def _get_company_preset() -> CompanyPreset:
+    """Singleton row (id=1), created on first access. Superseded the fixed
+    CONTRACT_* env vars as the source for template defaults - a blank field
+    here still falls back to that env-configured value (see the two
+    _*_template_defaults() functions below), so upgrading doesn't lose
+    whatever was already configured via environment."""
+    preset = CompanyPreset.query.get(1)
+    if not preset:
+        preset = CompanyPreset(id=1)
+        db.session.add(preset)
+        db.session.commit()
+    return preset
+
+
+def _company_preset_field(preset: CompanyPreset, field: str, config_key: str, fallback: str) -> str:
+    return getattr(preset, field, None) or current_app.config.get(config_key) or fallback
+
+
+def _contract_template_defaults():
+    preset = _get_company_preset()
+    return {
+        "name": "Freelancer Driver Contract - Ninja",
+        "first_party_name": _company_preset_field(preset, "first_party_name", "CONTRACT_FIRST_PARTY_NAME", "Speed Logi Company"),
+        "first_party_name_ar": _company_preset_field(preset, "first_party_name_ar", "CONTRACT_FIRST_PARTY_NAME_AR", "شركة سبيد لوجي"),
+        "first_party_label": _company_preset_field(preset, "first_party_label", "CONTRACT_FIRST_PARTY_LABEL", "First Party"),
+        "first_party_label_ar": _company_preset_field(preset, "first_party_label_ar", "CONTRACT_FIRST_PARTY_LABEL_AR", "الطرف الأول"),
+        "second_party_label": _company_preset_field(preset, "second_party_label", "CONTRACT_SECOND_PARTY_LABEL", "Second Party / The Courier"),
+        "second_party_label_ar": _company_preset_field(preset, "second_party_label_ar", "CONTRACT_SECOND_PARTY_LABEL_AR", "الطرف الثاني / السائق"),
+        "intro_content": (
+            "Whereas the Parties have entered an Employment Contract, they hereby agree that this "
+            "Addendum shall form an integral part of the Employment Contract and shall be governed by "
+            "the following terms and conditions."
+        ),
+        "intro_content_ar": (
+            "حيث إن الطرفين قد أبرما عقد عمل، فقد اتفقا بموجب هذا الملحق على أن يكون جزءًا لا يتجزأ من عقد "
+            "العمل، وأن تسري عليه الشروط والأحكام التالية."
+        ),
+        "body_content": (
+            "This Addendum operates on the monthly package system. The Courier's monthly target shall be "
+            "{target_orders} completed delivery orders during the Company's approved evaluation period. "
+            "The Courier shall be entitled to a gross monthly salary of SAR {target_salary}, provided "
+            "that the monthly target and all performance indicators set forth in this Addendum are achieved."
+        ),
+        "body_content_ar": (
+            "يعمل هذا الملحق وفق نظام الباقة الشهرية. ويكون المستهدف الشهري للمندوب هو {target_orders} طلبًا "
+            "مكتملًا خلال فترة التقييم المعتمدة من الشركة. ويستحق المندوب راتبًا شهريًا إجماليًا قدره "
+            "{target_salary} ريال سعودي، شريطة تحقيق المستهدف الشهري وجميع مؤشرات الأداء المنصوص عليها في هذا "
+            "الملحق."
+        ),
+        "eligibility_content": (
+            "To be eligible for the monthly salary and any additional incentives, the Courier must achieve "
+            "the required completed orders, maintain a delivery speed rate of no less than 85%, maintain "
+            "an order acceptance rate of no less than 95%, commit to the approved work schedule with a "
+            "minimum shift duration of 11 hours per shift, comply with all Company policies and operational "
+            "procedures, maintain a professional appearance, provide excellent customer service, and protect "
+            "the Company's reputation. If any performance indicator is not achieved, the Company reserves "
+            "the right to recalculate the Courier's compensation in accordance with this Addendum."
+        ),
+        "eligibility_content_ar": (
+            "لاستحقاق الراتب الشهري وأي حوافز إضافية، يجب على المندوب تحقيق العدد المطلوب من الطلبات المكتملة، "
+            "والمحافظة على سرعة توصيل لا تقل عن 85%، ونسبة قبول طلبات لا تقل عن 95%، والالتزام بجدول العمل "
+            "المعتمد بحد أدنى 11 ساعة لكل وردية، والالتزام بسياسات الشركة وإجراءاتها التشغيلية، والمحافظة على "
+            "المظهر المهني، وتقديم خدمة عملاء ممتازة، وحماية سمعة الشركة. وفي حال عدم تحقيق أي مؤشر من مؤشرات "
+            "الأداء، يحق للشركة إعادة احتساب مستحقات المندوب وفقًا لهذا الملحق."
+        ),
+        "general_terms_content": (
+            "This Addendum forms an integral part of the Employment Contract executed between the Parties "
+            "and shall be read together with the Employment Contract unless otherwise stated herein. The "
+            "Courier acknowledges that he has carefully read, understood, and accepted all the terms and "
+            "conditions of this Addendum, including the salary calculation method, incentives, and deductions, "
+            "without any reservation. The Courier shall comply with all operational instructions issued by "
+            "the Company, its clients, or the approved operating platform, provided that such instructions "
+            "do not conflict with the applicable laws and regulations. The Company reserves the right to amend "
+            "the package target, incentive scheme, deduction mechanism, or performance indicators whenever "
+            "business requirements so require, provided that the Courier is notified before such amendments "
+            "become effective. In the event of any conflict between this Addendum and the Employment Contract, "
+            "the provisions of this Addendum shall prevail with respect to the package system, performance "
+            "indicators, incentives, and deductions. This Addendum shall be governed by the applicable laws "
+            "and regulations of the Kingdom of Saudi Arabia."
+        ),
+        "general_terms_content_ar": (
+            "يُعد هذا الملحق جزءًا لا يتجزأ من عقد العمل المبرم بين الطرفين، ويُقرأ مع عقد العمل ما لم يُنص "
+            "على خلاف ذلك في هذا الملحق. ويقر المندوب بأنه قرأ وفهم ووافق على جميع شروط وأحكام هذا الملحق، بما "
+            "في ذلك آلية احتساب الراتب والحوافز والخصومات، دون أي تحفظ. ويلتزم المندوب بجميع التعليمات "
+            "التشغيلية الصادرة من الشركة أو عملائها أو المنصة التشغيلية المعتمدة، ما دامت لا تتعارض مع الأنظمة "
+            "واللوائح المعمول بها. ويحق للشركة تعديل المستهدف أو آلية الحوافز أو آلية الخصومات أو مؤشرات "
+            "الأداء متى اقتضت متطلبات العمل ذلك، على أن يتم إشعار المندوب قبل سريان تلك التعديلات. وفي حال "
+            "تعارض هذا الملحق مع عقد العمل، تكون أحكام هذا الملحق هي السارية فيما يتعلق بنظام الباقة ومؤشرات "
+            "الأداء والحوافز والخصومات. ويخضع هذا الملحق لأنظمة ولوائح المملكة العربية السعودية."
+        ),
+        "target_orders": 460,
+        "target_salary": 5500,
+        "bonus_per_extra_order": 10,
+        "deduction_per_missing_order": 22,
+        "calculation_tiers_json": (
+            '[{"label":"Level One","min_orders":460,"max_orders":null,"calculation_mode":"bonus_per_extra_order","per_order_rate":10},'
+            '{"label":"Level Two","min_orders":414,"max_orders":459,"calculation_mode":"deduction_per_missing_order","per_order_rate":22},'
+            '{"label":"Level Three","min_orders":368,"max_orders":413,"calculation_mode":"deduction_per_missing_order","per_order_rate":22.5},'
+            '{"label":"Level Four","min_orders":322,"max_orders":367,"calculation_mode":"deduction_per_missing_order","per_order_rate":23},'
+            '{"label":"Level Five","min_orders":0,"max_orders":321,"calculation_mode":"performance_review","per_order_rate":0}]'
+        ),
+        "company_signatory_name": _company_preset_field(preset, "company_signatory_name", "CONTRACT_COMPANY_SIGNATORY_NAME", "Authorized Signatory"),
+        "company_signatory_title": _company_preset_field(preset, "company_signatory_title", "CONTRACT_COMPANY_SIGNATORY_TITLE", "Operations Director"),
+        "signature_notes": (
+            "This Addendum has been executed in two original copies, with each Party retaining one copy "
+            "for implementation."
+        ),
+        "signature_notes_ar": "حرر هذا الملحق من نسختين أصليتين، يحتفظ كل طرف بنسخة للعمل بموجبها.",
+    }
+
+
+def _fill_promissory_note_template_from_form(template, form):
+    template.name = form.name.data
+    template.business_id = None
+    template.driver_type_id = None
+    template.document_kind = "promissory_note"
+    template.first_party_name = form.first_party_name.data or None
+    template.first_party_name_ar = form.first_party_name_ar.data or None
+    template.first_party_label = form.first_party_label.data or None
+    template.first_party_label_ar = form.first_party_label_ar.data or None
+    template.second_party_label = form.second_party_label.data or None
+    template.second_party_label_ar = form.second_party_label_ar.data or None
+    template.intro_content = form.intro_content.data or None
+    template.intro_content_ar = form.intro_content_ar.data or None
+    template.body_content = form.body_content.data
+    template.body_content_ar = form.body_content_ar.data or None
+    template.eligibility_content = form.eligibility_content.data or None
+    template.eligibility_content_ar = form.eligibility_content_ar.data or None
+    template.general_terms_content = form.general_terms_content.data or None
+    template.general_terms_content_ar = form.general_terms_content_ar.data or None
+    template.company_signatory_name = form.company_signatory_name.data or None
+    template.company_signatory_title = form.company_signatory_title.data or None
+    template.signature_notes = form.signature_notes.data or None
+    template.signature_notes_ar = form.signature_notes_ar.data or None
+    template.is_active = form.is_active.data
+    return template
+
+
+def _promissory_note_template_defaults():
+    preset = _get_company_preset()
+    return {
+        "name": "Driver Promissory Note",
+        "first_party_name": _company_preset_field(preset, "first_party_name", "CONTRACT_FIRST_PARTY_NAME", "Speed Logi Company"),
+        "first_party_name_ar": _company_preset_field(preset, "first_party_name_ar", "CONTRACT_FIRST_PARTY_NAME_AR", "شركة سبيد لوجي"),
+        "first_party_label": _company_preset_field(preset, "first_party_label", "CONTRACT_FIRST_PARTY_LABEL", "First Party"),
+        "first_party_label_ar": _company_preset_field(preset, "first_party_label_ar", "CONTRACT_FIRST_PARTY_LABEL_AR", "الطرف الأول"),
+        "second_party_label": _company_preset_field(preset, "second_party_label", "CONTRACT_SECOND_PARTY_LABEL", "Second Party / The Courier"),
+        "second_party_label_ar": _company_preset_field(preset, "second_party_label_ar", "CONTRACT_SECOND_PARTY_LABEL_AR", "الطرف الثاني / السائق"),
+        "intro_content": "",
+        "intro_content_ar": "",
+        "body_content": (
+            "This is to confirm that {driver_name} (Driver ID: {driver_id}) has received and acknowledged "
+            "the terms of this promissory note as part of driver onboarding."
+        ),
+        "body_content_ar": (
+            "هذا إقرار بأن {driver_name} (رقم السائق: {driver_id}) قد استلم وأقر بشروط سند لأمر هذا "
+            "كجزء من إجراءات انضمام السائق."
+        ),
+        "eligibility_content": "",
+        "eligibility_content_ar": "",
+        "general_terms_content": "",
+        "general_terms_content_ar": "",
+        "company_signatory_name": _company_preset_field(preset, "company_signatory_name", "CONTRACT_COMPANY_SIGNATORY_NAME", "Authorized Signatory"),
+        "company_signatory_title": _company_preset_field(preset, "company_signatory_title", "CONTRACT_COMPANY_SIGNATORY_TITLE", "Operations Director"),
+        "signature_notes": "",
+        "signature_notes_ar": "",
+    }
+
 # -------------------------
 # SuperAdmin Dashboard
 # -------------------------
 @admin_bp.route("/", methods=["GET"])
 @login_required
 def dashboard():
-    # Only SuperAdmin can access this
-    if current_user.role != "SuperAdmin":
-        return "Forbidden", 403
+    if not user_can_access_dashboard(current_user, "admin.dashboard"):
+        flash("Access denied. SuperAdmin role required.", "danger")
+        return redirect(url_for("auth.login"))
 
     # -------------------------
     # Users
@@ -333,6 +542,8 @@ def dashboard():
         q=search_q,
         all_businesses=all_businesses,
         branches=Branch.query.filter(Branch.deleted_at.is_(None)).order_by(Branch.name).all(),
+        all_roles=Role.query.order_by(Role.name).all(),
+        can_impersonate=user_has_permission(current_user, "users.impersonate"),
     )
 
 # -------------------------
@@ -539,6 +750,7 @@ def add_user():
         return "Access Denied", 403
 
     form = AddUserForm()
+    form.role.choices = [(r.name, r.name) for r in Role.query.order_by(Role.name).all()]
     if not form.validate_on_submit():
         flash("Please correct the user form.", "danger")
         return redirect(url_for("admin.dashboard"))
@@ -653,6 +865,7 @@ def add_user():
 @require_roles_or_owner("SuperAdmin", owner_loader=lambda user_id: User.query.get(user_id), owner_attr="id")
 def edit_user(user_id):
     form = EditUserForm()
+    form.role.choices = [(r.name, r.name) for r in Role.query.order_by(Role.name).all()]
     if not form.validate_on_submit():
         flash("Invalid or incomplete user data.", "danger")
         return redirect(url_for("admin.dashboard"))
@@ -750,11 +963,11 @@ def change_password():
 
 
 # -------------------------
-# Onboarding Workflow Builder + Contract Template Manager
+# Onboarding Workflow Builder
 #
-# Admin-editable data driving services/onboarding_workflow.py and
-# services/contracts.py - adding a driver type's stage sequence or a
-# platform's contract template happens here, not in code.
+# Admin-editable data driving services/onboarding_workflow.py - adding a
+# driver type's stage sequence and related workflow behavior happens here,
+# not in code.
 # -------------------------
 @admin_bp.route("/workflow-config", methods=["GET"])
 @login_required
@@ -767,8 +980,6 @@ def workflow_config():
         OnboardingStageTemplate.driver_type_id, OnboardingStageTemplate.sequence_order
     ).all()
     type_settings = {row.driver_type_id: row for row in DriverTypeSettings.query.all()}
-    contract_templates = ContractTemplate.query.order_by(ContractTemplate.name).all()
-    businesses = _cached_businesses()
 
     stages_by_type = {}
     for row in stage_templates:
@@ -779,11 +990,46 @@ def workflow_config():
         driver_types=driver_types,
         stages_by_type=stages_by_type,
         type_settings=type_settings,
-        contract_templates=contract_templates,
-        businesses=businesses,
         stage_form=OnboardingStageTemplateForm(),
         settings_form=DriverTypeSettingsForm(),
-        contract_form=ContractTemplateForm(),
+    )
+
+
+@admin_bp.route("/contract-templates", methods=["GET"])
+@login_required
+def contract_templates():
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    edit_template_id = request.args.get("edit_template_id", type=int)
+    action = (request.args.get("action") or "").strip().lower()
+    show_contract_form = action == "new" or bool(edit_template_id)
+    editing_template = (
+        ContractTemplate.query.filter(
+            ContractTemplate.id == edit_template_id,
+            or_(ContractTemplate.document_kind.is_(None), ContractTemplate.document_kind == "driver_contract"),
+        ).first()
+        if edit_template_id else None
+    )
+    form_seed = editing_template or ContractTemplate(**_contract_template_defaults())
+    templates = (
+        ContractTemplate.query.filter(
+            or_(ContractTemplate.document_kind.is_(None), ContractTemplate.document_kind == "driver_contract")
+        )
+        .order_by(ContractTemplate.updated_at.desc(), ContractTemplate.name.asc())
+        .all()
+    )
+
+    return render_template(
+        "admin_contract_templates.html",
+        contract_templates=templates,
+        businesses=_cached_businesses(),
+        contract_form=ContractTemplateForm(obj=form_seed),
+        editing_template=editing_template,
+        show_contract_form=show_contract_form,
+        contract_defaults=_contract_template_defaults(),
+        company_preset=_get_company_preset(),
+        company_preset_form=CompanyPresetForm(obj=_get_company_preset()),
     )
 
 
@@ -854,15 +1100,17 @@ def save_driver_type_settings():
     settings = DriverTypeSettings.query.get(form.driver_type_id.data)
     if settings:
         settings.contract_mode = form.contract_mode.data
+        settings.requires_qiwa_contract = form.requires_qiwa_contract.data
     else:
         settings = DriverTypeSettings(
             driver_type_id=form.driver_type_id.data,
             contract_mode=form.contract_mode.data,
+            requires_qiwa_contract=form.requires_qiwa_contract.data,
         )
         db.session.add(settings)
 
     db.session.commit()
-    flash("Driver type contract mode saved.", "success")
+    flash("Driver type settings saved.", "success")
     return redirect(url_for("admin.workflow_config"))
 
 
@@ -877,19 +1125,49 @@ def add_contract_template():
         for field, errors in form.errors.items():
             for err in errors:
                 flash(f"{field}: {err}", "danger")
-        return redirect(url_for("admin.workflow_config"))
+        return redirect(url_for("admin.contract_templates"))
 
-    template = ContractTemplate(
-        name=form.name.data,
-        business_id=form.business_id.data or None,
-        driver_type_id=form.driver_type_id.data or None,
-        body_content=form.body_content.data,
-        is_active=form.is_active.data,
-    )
+    template = _fill_contract_template_from_form(ContractTemplate(), form)
     db.session.add(template)
     db.session.commit()
     flash(f"Contract template '{template.name}' created.", "success")
-    return redirect(url_for("admin.workflow_config"))
+    return redirect(url_for("admin.contract_templates"))
+
+
+@admin_bp.route("/workflow-config/contract-template/<int:template_id>/update", methods=["POST"])
+@login_required
+def update_contract_template(template_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = ContractTemplateForm()
+    if not form.validate_on_submit():
+        for field, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field}: {err}", "danger")
+        return redirect(url_for("admin.contract_templates", edit_template_id=template_id))
+
+    template = ContractTemplate.query.get_or_404(template_id)
+    _fill_contract_template_from_form(template, form)
+    db.session.commit()
+    flash(f"Contract template '{template.name}' updated.", "success")
+    return redirect(url_for("admin.contract_templates"))
+
+
+@admin_bp.route("/workflow-config/contract-template/<int:template_id>/preview", methods=["GET"])
+@login_required
+def preview_contract_template(template_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    template = ContractTemplate.query.get_or_404(template_id)
+    pdf_bytes = render_contract_template_preview(template)
+    return send_file(
+        BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=False,
+        download_name=f"{template.name.replace(' ', '_')}_preview.pdf",
+    )
 
 
 @admin_bp.route("/workflow-config/contract-template/<int:template_id>/toggle-active", methods=["POST"])
@@ -901,13 +1179,13 @@ def toggle_contract_template(template_id):
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
         flash("Invalid request.", "danger")
-        return redirect(url_for("admin.workflow_config"))
+        return redirect(url_for("admin.contract_templates"))
 
     template = ContractTemplate.query.get_or_404(template_id)
     template.is_active = not template.is_active
     db.session.commit()
     flash(f"Contract template '{template.name}' is now {'active' if template.is_active else 'inactive'}.", "success")
-    return redirect(url_for("admin.workflow_config"))
+    return redirect(url_for("admin.contract_templates"))
 
 
 @admin_bp.route("/workflow-config/contract-template/<int:template_id>/delete", methods=["POST"])
@@ -919,13 +1197,175 @@ def delete_contract_template(template_id):
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
         flash("Invalid request.", "danger")
-        return redirect(url_for("admin.workflow_config"))
+        return redirect(url_for("admin.contract_templates"))
 
     template = ContractTemplate.query.get_or_404(template_id)
     db.session.delete(template)
     db.session.commit()
     flash("Contract template deleted.", "success")
-    return redirect(url_for("admin.workflow_config"))
+    return redirect(url_for("admin.contract_templates"))
+
+
+# -------------------------
+# Promissory Note Templates
+#
+# Same ContractTemplate table/scenario as driver contracts above, scoped by
+# document_kind="promissory_note" - one template for every driver regardless
+# of driver type or platform (see services/contracts.py generate_promissory_note),
+# so business_id/driver_type_id are always forced to None here.
+# -------------------------
+@admin_bp.route("/promissory-note-templates", methods=["GET"])
+@login_required
+def promissory_note_templates():
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    edit_template_id = request.args.get("edit_template_id", type=int)
+    action = (request.args.get("action") or "").strip().lower()
+    show_form = action == "new" or bool(edit_template_id)
+    editing_template = (
+        ContractTemplate.query.filter_by(id=edit_template_id, document_kind="promissory_note").first()
+        if edit_template_id else None
+    )
+    form_seed = editing_template or ContractTemplate(**_promissory_note_template_defaults())
+    templates = (
+        ContractTemplate.query.filter_by(document_kind="promissory_note")
+        .order_by(ContractTemplate.updated_at.desc(), ContractTemplate.name.asc())
+        .all()
+    )
+
+    return render_template(
+        "admin_promissory_note_templates.html",
+        promissory_note_templates=templates,
+        promissory_note_form=PromissoryNoteTemplateForm(obj=form_seed),
+        editing_template=editing_template,
+        show_form=show_form,
+        template_defaults=_promissory_note_template_defaults(),
+        company_preset=_get_company_preset(),
+        company_preset_form=CompanyPresetForm(obj=_get_company_preset()),
+    )
+
+
+@admin_bp.route("/workflow-config/promissory-note-template/add", methods=["POST"])
+@login_required
+def add_promissory_note_template():
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = PromissoryNoteTemplateForm()
+    if not form.validate_on_submit():
+        for field, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field}: {err}", "danger")
+        return redirect(url_for("admin.promissory_note_templates"))
+
+    template = _fill_promissory_note_template_from_form(ContractTemplate(), form)
+    db.session.add(template)
+    db.session.commit()
+    flash(f"Promissory note template '{template.name}' created.", "success")
+    return redirect(url_for("admin.promissory_note_templates"))
+
+
+@admin_bp.route("/workflow-config/promissory-note-template/<int:template_id>/update", methods=["POST"])
+@login_required
+def update_promissory_note_template(template_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = PromissoryNoteTemplateForm()
+    if not form.validate_on_submit():
+        for field, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field}: {err}", "danger")
+        return redirect(url_for("admin.promissory_note_templates", edit_template_id=template_id))
+
+    template = ContractTemplate.query.filter_by(id=template_id, document_kind="promissory_note").first_or_404()
+    _fill_promissory_note_template_from_form(template, form)
+    db.session.commit()
+    flash(f"Promissory note template '{template.name}' updated.", "success")
+    return redirect(url_for("admin.promissory_note_templates"))
+
+
+@admin_bp.route("/workflow-config/promissory-note-template/<int:template_id>/preview", methods=["GET"])
+@login_required
+def preview_promissory_note_template(template_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    template = ContractTemplate.query.filter_by(id=template_id, document_kind="promissory_note").first_or_404()
+    pdf_bytes = render_contract_template_preview(template)
+    return send_file(
+        BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=False,
+        download_name=f"{template.name.replace(' ', '_')}_preview.pdf",
+    )
+
+
+@admin_bp.route("/workflow-config/promissory-note-template/<int:template_id>/toggle-active", methods=["POST"])
+@login_required
+def toggle_promissory_note_template(template_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.promissory_note_templates"))
+
+    template = ContractTemplate.query.filter_by(id=template_id, document_kind="promissory_note").first_or_404()
+    template.is_active = not template.is_active
+    db.session.commit()
+    flash(f"Promissory note template '{template.name}' is now {'active' if template.is_active else 'inactive'}.", "success")
+    return redirect(url_for("admin.promissory_note_templates"))
+
+
+@admin_bp.route("/workflow-config/promissory-note-template/<int:template_id>/delete", methods=["POST"])
+@login_required
+def delete_promissory_note_template(template_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.promissory_note_templates"))
+
+    template = ContractTemplate.query.filter_by(id=template_id, document_kind="promissory_note").first_or_404()
+    db.session.delete(template)
+    db.session.commit()
+    flash("Promissory note template deleted.", "success")
+    return redirect(url_for("admin.promissory_note_templates"))
+
+
+@admin_bp.route("/workflow-config/company-preset/save", methods=["POST"])
+@login_required
+def save_company_preset():
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CompanyPresetForm()
+    if not form.validate_on_submit():
+        for field, errors in form.errors.items():
+            for err in errors:
+                flash(f"{field}: {err}", "danger")
+    else:
+        preset = _get_company_preset()
+        preset.first_party_name = form.first_party_name.data or None
+        preset.first_party_name_ar = form.first_party_name_ar.data or None
+        preset.first_party_label = form.first_party_label.data or None
+        preset.first_party_label_ar = form.first_party_label_ar.data or None
+        preset.second_party_label = form.second_party_label.data or None
+        preset.second_party_label_ar = form.second_party_label_ar.data or None
+        preset.company_signatory_name = form.company_signatory_name.data or None
+        preset.company_signatory_title = form.company_signatory_title.data or None
+        db.session.commit()
+        flash("Company preset updated. New templates will start from these defaults.", "success")
+
+    redirect_to = request.form.get("redirect_to")
+    if redirect_to == "promissory":
+        return redirect(url_for("admin.promissory_note_templates"))
+    return redirect(url_for("admin.contract_templates"))
 
 
 # -------------------------
@@ -954,6 +1394,7 @@ def user_access(user_id):
         all_permissions=all_permissions,
         granted_role_ids=granted_role_ids,
         overrides=overrides,
+        can_impersonate=user_has_permission(current_user, "users.impersonate"),
     )
 
 
@@ -1010,6 +1451,32 @@ def save_user_permissions(user_id):
     return redirect(url_for("admin.user_access", user_id=user_id))
 
 
+@admin_bp.route("/user/<int:user_id>/impersonate", methods=["POST"])
+@login_required
+@require_permission("users.impersonate")
+def impersonate_user(user_id):
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    target = User.query.get_or_404(user_id)
+    admin_username = current_user.username
+    try:
+        impersonation.start(current_user, target, session, ip_address=request.remote_addr)
+    except ImpersonationError as e:
+        flash(str(e), "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    login_user(target)
+    current_app.logger.info(
+        "impersonation_start",
+        extra={"admin": admin_username, "target": target.username},
+    )
+    flash(f"Now viewing DOBS as {target.name or target.username}.", "warning")
+    return _post_login_redirect(target)
+
+
 # ------------------------
 # Role management (create roles, define their default permissions)
 # ------------------------
@@ -1043,6 +1510,7 @@ def roles():
         legacy_role_names=LEGACY_ROLE_NAMES,
         user_counts=user_counts,
         role_form=RoleForm(),
+        dashboard_choices=DASHBOARD_ENDPOINT_CHOICES,
     )
 
 
@@ -1063,9 +1531,41 @@ def add_role():
         flash("A role with that name already exists.", "danger")
         return redirect(url_for("admin.roles"))
 
-    db.session.add(Role(name=form.name.data.strip(), description=form.description.data or None))
+    db.session.add(Role(
+        name=form.name.data.strip(),
+        description=form.description.data or None,
+        dashboard_endpoint=form.dashboard_endpoint.data or None,
+    ))
     db.session.commit()
     flash(f"Role '{form.name.data}' created.", "success")
+    return redirect(url_for("admin.roles"))
+
+
+@admin_bp.route("/roles/<int:role_id>/set-dashboard", methods=["POST"])
+@login_required
+def set_role_dashboard(role_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.roles"))
+
+    role = Role.query.get_or_404(role_id)
+    if role.name in LEGACY_ROLE_NAMES:
+        flash(f"'{role.name}' is a built-in role - its dashboard cannot be changed here.", "danger")
+        return redirect(url_for("admin.roles"))
+
+    valid_endpoints = {code for code, _label in DASHBOARD_ENDPOINT_CHOICES}
+    endpoint = request.form.get("dashboard_endpoint", "")
+    if endpoint not in valid_endpoints:
+        flash("Unknown dashboard.", "danger")
+        return redirect(url_for("admin.roles"))
+
+    role.dashboard_endpoint = endpoint or None
+    db.session.commit()
+    flash(f"Dashboard updated for role '{role.name}'.", "success")
     return redirect(url_for("admin.roles"))
 
 
@@ -1093,6 +1593,7 @@ def delete_role(role_id):
         flash(f"'{role.name}' is still assigned to at least one user and cannot be deleted.", "danger")
         return redirect(url_for("admin.roles"))
 
+    RolePermission.query.filter_by(role_id=role.id).delete()
     db.session.delete(role)
     db.session.commit()
     flash(f"Role '{role.name}' deleted.", "success")

@@ -55,17 +55,26 @@ def validate_upload(file_storage, max_bytes: int, allowed_ext=ALLOWED_EXTENSIONS
         raise ValueError(f"File too large. Maximum {max_bytes // (1024 * 1024)} MB.")
 
 
-def save_to_shared_storage(file_storage, driver_id: int, document_type: str, shared_root: str) -> str:
+def save_to_shared_storage(file_storage, driver_id: int, document_type: str, shared_root: str, filename: str | None = None) -> str:
     """Save a file to the shared driver_documents storage and return the relative path.
 
-    Saves to: {shared_root}/{driver_id}/{timestamp}_{type}.{ext}
+    Raw uploads (no meaningful name to give the file) save as
+    {shared_root}/{driver_id}/{timestamp}_{type}.{ext}. System-generated
+    documents (contracts, promissory notes, ...) pass an explicit `filename`
+    so the file on disk reads the same human-readable name every caller
+    uses, e.g. via services/contracts.py's _document_filename().
     Returns:  {driver_id}/{filename}  (relative path stored in driver_documents.file_path)
     """
     ext = Path(file_storage.filename).suffix.lower()
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    filename = secure_filename(f"{timestamp}_{document_type}{ext}")
+    if filename:
+        final_name = secure_filename(filename)
+        if not final_name.lower().endswith(ext):
+            final_name = f"{final_name}{ext}"
+    else:
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        final_name = secure_filename(f"{timestamp}_{document_type}{ext}")
     folder = Path(shared_root) / str(driver_id)
     folder.mkdir(parents=True, exist_ok=True)
     file_storage.stream.seek(0)
-    file_storage.save(folder / filename)
-    return f"{driver_id}/{filename}"
+    file_storage.save(folder / final_name)
+    return f"{driver_id}/{final_name}"

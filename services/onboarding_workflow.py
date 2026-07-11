@@ -35,17 +35,41 @@ def _condition_skips(driver, row) -> bool:
     return actual_str == str(row.skip_condition_value).lower()
 
 
+# Used only when a driver's type has no configured stage sequence at all -
+# e.g. a driver type created in DMS before a DOBS admin (or DMS's own
+# auto-seed on type creation) has set one up. Prevents a driver from
+# silently getting stuck forever; covers every stage so nothing is skipped
+# by default. Configure the type properly in Workflow & Contracts to
+# replace this fallback with the real sequence.
+DEFAULT_STAGE_SEQUENCE = (
+    "Ops Manager", "HR", "Ops Supervisor", "Fleet Manager", "Finance", "HR Final", "Completed",
+)
+
+
 def next_stage(driver, current_stage: str = None):
     """Return the next non-skipped configured stage after `current_stage`
     (defaults to driver.onboarding_stage) for the driver's type.
 
-    Returns None if there's no configured sequence for this driver's type,
-    `current_stage` isn't in that sequence, or it's already the last stage.
+    Falls back to DEFAULT_STAGE_SEQUENCE if the driver's type has no
+    configured sequence at all (logs a warning - this is a misconfiguration,
+    not normal operation). Returns None if `current_stage` isn't in the
+    (configured or fallback) sequence, or it's already the last stage.
     """
     current_stage = driver.onboarding_stage if current_stage is None else current_stage
     rows = _stage_rows_for(driver.driver_type_id)
+
     if not rows:
-        return None
+        current_app.logger.warning(
+            "onboarding_workflow: no stage template configured for driver_type_id=%s "
+            "(driver=%s) - using default fallback sequence. Configure this type in "
+            "Workflow & Contracts to remove this warning.",
+            driver.driver_type_id, driver.id,
+        )
+        try:
+            idx = DEFAULT_STAGE_SEQUENCE.index(current_stage)
+        except ValueError:
+            return None
+        return DEFAULT_STAGE_SEQUENCE[idx + 1] if idx + 1 < len(DEFAULT_STAGE_SEQUENCE) else None
 
     stage_names = [row.stage_name for row in rows]
     try:

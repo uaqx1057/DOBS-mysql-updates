@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tr('Promissory Note Templates', 'قوالب سند لأمر') }} - DOBS{% endblock %}
+{% block navbar_title %}{{ tr('Promissory Note Templates', 'قوالب سند لأمر') }}{% endblock %}
+{% block navbar_actions %}
+<a href="{{ url_for('admin.dashboard') }}" class="nav-btn">&larr; {{ tr('Back to Dashboard', 'العودة للوحة التحكم') }}</a>
+<a href="{{ url_for('admin.workflow_config') }}" class="nav-btn">{{ tr('Workflow Configuration', 'إعداد سير العمل') }}</a>
+{% endblock %}
+
+{% block content %}
+<div class="page-header reveal">
+  <h1 class="page-title">{{ tr('Promissory Note Templates', 'قوالب سند لأمر') }}</h1>
+  <p class="page-subtitle">{{ tr('One template covers every driver at HR stage, regardless of driver type or platform. Company-side identity and signatory defaults are prefilled to keep template creation consistent.', 'قالب واحد يغطي جميع السائقين في مرحلة الموارد البشرية، بغض النظر عن نوع السائق أو المنصة. يتم تعبئة بيانات الطرف الأول والمفوّض بالتوقيع تلقائيًا للحفاظ على الاتساق.') }}</p>
+</div>
+
+<div class="card reveal mb-4">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+    <div>
+      <h4 class="fs-5 mb-1">{{ tr('Templates List', 'قائمة القوالب') }}</h4>
+      <p class="text-muted mb-0">{{ tr('Review existing templates, preview them, and manage active versions.', 'راجع القوالب الحالية، عاينها، وأدر النسخ النشطة.') }}</p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{{ url_for('admin.promissory_note_templates', action='new') }}#template-form" class="btn btn-primary">{{ tr('Add New Template', 'إضافة قالب جديد') }}</a>
+      {% if show_form %}
+      <a href="{{ url_for('admin.promissory_note_templates') }}" class="btn btn-light">{{ tr('Close Form', 'إغلاق النموذج') }}</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card reveal mb-4">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>{{ tr('Name', 'الاسم') }}</th>
+          <th>{{ tr('First Party', 'الطرف الأول') }}</th>
+          <th>{{ tr('Signatory', 'الموقّع') }}</th>
+          <th>{{ tr('Status', 'الحالة') }}</th>
+          <th>{{ tr('Actions', 'الإجراءات') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tpl in promissory_note_templates %}
+        <tr>
+          <td>
+            <div class="fw-semibold">{{ tpl.name }}</div>
+            <div class="text-muted small">{{ tpl.updated_at.strftime('%Y-%m-%d %H:%M') if tpl.updated_at else '-' }}</div>
+          </td>
+          <td>
+            <div>{{ tpl.first_party_name or template_defaults.first_party_name }}</div>
+            <div class="text-muted small">{{ tpl.first_party_label or template_defaults.first_party_label }}</div>
+          </td>
+          <td>
+            <div>{{ tpl.company_signatory_name or template_defaults.company_signatory_name }}</div>
+            <div class="text-muted small">{{ tpl.company_signatory_title or template_defaults.company_signatory_title }}</div>
+          </td>
+          <td><span class="badge-soft {{ 'success' if tpl.is_active else 'danger' }}">{{ tr('Active', 'نشط') if tpl.is_active else tr('Inactive', 'غير نشط') }}</span></td>
+          <td class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.preview_promissory_note_template', template_id=tpl.id) }}" target="_blank">{{ tr('Preview', 'معاينة') }}</a>
+            <a class="btn btn-sm btn-outline-info" href="{{ url_for('admin.promissory_note_templates', edit_template_id=tpl.id) }}#template-form">{{ tr('Edit', 'تعديل') }}</a>
+            <form method="post" action="{{ url_for('admin.toggle_promissory_note_template', template_id=tpl.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary" type="submit">{{ tr('Deactivate', 'إلغاء التفعيل') if tpl.is_active else tr('Activate', 'تفعيل') }}</button>
+            </form>
+            <form method="post" action="{{ url_for('admin.delete_promissory_note_template', template_id=tpl.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-danger" type="submit" onclick="return confirm('{{ tr('Delete this template?', 'حذف هذا القالب؟') }}');">{{ tr('Delete', 'حذف') }}</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" class="text-center text-muted py-4">{{ tr('No promissory note templates have been created yet.', 'لم يتم إنشاء أي قالب سند لأمر بعد.') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if show_form %}
+<div class="card reveal" id="template-form">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+    <div>
+      <h4 class="fs-5 mb-1">
+        {% if editing_template %}
+          {{ tr('Edit Promissory Note Template', 'تعديل قالب سند لأمر') }}
+        {% else %}
+          {{ tr('Add New Promissory Note Template', 'إضافة قالب سند لأمر جديد') }}
+        {% endif %}
+      </h4>
+      <p class="text-muted mb-0">
+        {{ tr('This applies to every driver regardless of driver type or platform.', 'ينطبق هذا على جميع السائقين بغض النظر عن نوع السائق أو المنصة.') }}
+      </p>
+    </div>
+    <div class="border rounded px-3 py-2 bg-light">
+      <div class="small text-muted mb-2">{{ tr('Company preset', 'إعداد الشركة الافتراضي') }}</div>
+      <form method="post" action="{{ url_for('admin.save_company_preset') }}" class="d-flex flex-column gap-2" style="min-width: 260px;">
+        {{ company_preset_form.hidden_tag() }}
+        <input type="hidden" name="redirect_to" value="promissory">
+        {{ company_preset_form.first_party_name(class_="form-control form-control-sm", placeholder=tr('First party name', 'اسم الطرف الأول')) }}
+        {{ company_preset_form.company_signatory_name(class_="form-control form-control-sm", placeholder=tr('Signatory name', 'اسم الموقّع')) }}
+        {{ company_preset_form.company_signatory_title(class_="form-control form-control-sm", placeholder=tr('Signatory title', 'صفة الموقّع')) }}
+        <details class="small">
+          <summary class="text-muted" style="cursor:pointer;">{{ tr('More fields', 'المزيد من الحقول') }}</summary>
+          <div class="d-flex flex-column gap-2 pt-2">
+            {{ company_preset_form.first_party_name_ar(class_="form-control form-control-sm", placeholder=tr('First party name (Arabic)', 'اسم الطرف الأول بالعربية')) }}
+            {{ company_preset_form.first_party_label(class_="form-control form-control-sm", placeholder=tr('First party label', 'وصف الطرف الأول')) }}
+            {{ company_preset_form.first_party_label_ar(class_="form-control form-control-sm", placeholder=tr('First party label (Arabic)', 'وصف الطرف الأول بالعربية')) }}
+            {{ company_preset_form.second_party_label(class_="form-control form-control-sm", placeholder=tr('Second party label', 'وصف الطرف الثاني')) }}
+            {{ company_preset_form.second_party_label_ar(class_="form-control form-control-sm", placeholder=tr('Second party label (Arabic)', 'وصف الطرف الثاني بالعربية')) }}
+          </div>
+        </details>
+        <button class="btn btn-sm btn-outline-primary" type="submit">{{ tr('Save Preset', 'حفظ الإعداد') }}</button>
+      </form>
+    </div>
+  </div>
+
+  <form class="row g-3" method="post" action="{{ url_for('admin.update_promissory_note_template', template_id=editing_template.id) if editing_template else url_for('admin.add_promissory_note_template') }}">
+    {{ promissory_note_form.hidden_tag() }}
+
+    <div class="col-12">
+      <h5 class="fs-6 fw-semibold text-secondary text-uppercase mb-3">{{ tr('Template Identity', 'هوية القالب') }}</h5>
+    </div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Template Name', 'اسم القالب') }}</label>{{ promissory_note_form.name(class_="form-control") }}</div>
+
+    <div class="col-12 pt-2">
+      <h5 class="fs-6 fw-semibold text-secondary text-uppercase mb-3">{{ tr('First Party Details', 'بيانات الطرف الأول') }}</h5>
+    </div>
+    <div class="col-md-6"><label class="form-label">{{ tr('First Party Name', 'اسم الطرف الأول') }}</label>{{ promissory_note_form.first_party_name(class_="form-control", **{"data-ar-target":"first_party_name_ar"}) }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('First Party Name (Arabic)', 'اسم الطرف الأول بالعربية') }}</label>{{ promissory_note_form.first_party_name_ar(class_="form-control", **{"data-ar-source":"first_party_name"}) }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('First Party Label', 'وصف الطرف الأول') }}</label>{{ promissory_note_form.first_party_label(class_="form-control", **{"data-ar-target":"first_party_label_ar"}) }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('First Party Label (Arabic)', 'وصف الطرف الأول بالعربية') }}</label>{{ promissory_note_form.first_party_label_ar(class_="form-control", **{"data-ar-source":"first_party_label"}) }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Second Party Label', 'وصف الطرف الثاني') }}</label>{{ promissory_note_form.second_party_label(class_="form-control", **{"data-ar-target":"second_party_label_ar"}) }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Second Party Label (Arabic)', 'وصف الطرف الثاني بالعربية') }}</label>{{ promissory_note_form.second_party_label_ar(class_="form-control", **{"data-ar-source":"second_party_label"}) }}</div>
+
+    <div class="col-12 pt-2">
+      <h5 class="fs-6 fw-semibold text-secondary text-uppercase mb-3">{{ tr('Note Body', 'محتوى السند') }}</h5>
+    </div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Intro (optional)', 'المقدمة (اختياري)') }}</label>{{ promissory_note_form.intro_content(class_="form-control", rows="3") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Intro (Arabic, optional)', 'المقدمة (عربي، اختياري)') }}</label>{{ promissory_note_form.intro_content_ar(class_="form-control", rows="3", dir="rtl") }}</div>
+    <div class="col-md-6">
+      <label class="form-label">{{ tr('Statement', 'الإقرار') }}</label>
+      {{ promissory_note_form.body_content(class_="form-control", rows="5") }}
+      <div class="form-text">{{ tr('Supports {driver_name}, {driver_id} and {iqama_number} placeholders, filled in per driver at generation time.', 'يدعم المتغيرات {driver_name} و {driver_id} و {iqama_number}، ويتم تعبئتها لكل سائق عند الإنشاء.') }}</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">{{ tr('Statement (Arabic)', 'الإقرار (عربي)') }}</label>
+      {{ promissory_note_form.body_content_ar(class_="form-control", rows="5", dir="rtl") }}
+      <div class="form-text">{{ tr('Shown on the Arabic side - leave blank and the English statement is shown on both sides.', 'يُعرض في الجهة العربية - اتركه فارغًا ليظهر النص الإنجليزي في الجهتين.') }}</div>
+    </div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Eligibility Terms (optional)', 'شروط الاستحقاق (اختياري)') }}</label>{{ promissory_note_form.eligibility_content(class_="form-control", rows="3") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Eligibility Terms (Arabic, optional)', 'شروط الاستحقاق (عربي، اختياري)') }}</label>{{ promissory_note_form.eligibility_content_ar(class_="form-control", rows="3", dir="rtl") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('General Terms (optional)', 'الشروط العامة (اختياري)') }}</label>{{ promissory_note_form.general_terms_content(class_="form-control", rows="3") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('General Terms (Arabic, optional)', 'الشروط العامة (عربي، اختياري)') }}</label>{{ promissory_note_form.general_terms_content_ar(class_="form-control", rows="3", dir="rtl") }}</div>
+
+    <div class="col-12 pt-2">
+      <h5 class="fs-6 fw-semibold text-secondary text-uppercase mb-3">{{ tr('Signatory', 'التوقيع') }}</h5>
+    </div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Company Signatory Name', 'اسم ممثل الشركة') }}</label>{{ promissory_note_form.company_signatory_name(class_="form-control") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Company Signatory Title', 'صفة ممثل الشركة') }}</label>{{ promissory_note_form.company_signatory_title(class_="form-control") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Signature Notes', 'ملاحظات التوقيع') }}</label>{{ promissory_note_form.signature_notes(class_="form-control", rows="3") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Signature Notes (Arabic)', 'ملاحظات التوقيع (عربي)') }}</label>{{ promissory_note_form.signature_notes_ar(class_="form-control", rows="3", dir="rtl") }}</div>
+
+    <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-3 pt-3">
+      <div class="form-check">
+        {{ promissory_note_form.is_active(class_="form-check-input") }}
+        <label class="form-check-label">{{ tr('Template is active', 'القالب نشط') }}</label>
+      </div>
+      <div class="d-flex gap-2">
+        <a class="btn btn-light" href="{{ url_for('admin.promissory_note_templates') }}">{{ tr('Cancel', 'إلغاء') }}</a>
+        <button class="btn btn-primary" type="submit">{{ tr('Update Template', 'تحديث القالب') if editing_template else tr('Save Template', 'حفظ القالب') }}</button>
+      </div>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+  (function () {
+    const translationMap = {
+      "Speed Logi Company": "شركة سبيد لوجي",
+      "First Party": "الطرف الأول",
+      "Second Party / The Courier": "الطرف الثاني / السائق",
+      "Second Party / Driver": "الطرف الثاني / السائق",
+      "Authorized Signatory": "المفوض بالتوقيع",
+      "Operations Director": "مدير العمليات"
+    };
+
+    function mirrorEnglishToArabic(value) {
+      if (!value) {
+        return "";
+      }
+      const exact = translationMap[value.trim()];
+      if (exact) {
+        return exact;
+      }
+      return value;
+    }
+
+    document.querySelectorAll("[data-ar-target]").forEach((sourceField) => {
+      const targetName = sourceField.getAttribute("data-ar-target");
+      const targetField = document.querySelector(`[name="${targetName}"]`);
+      if (!targetField) {
+        return;
+      }
+
+      let lastAutoValue = targetField.value || "";
+
+      const sync = () => {
+        const nextValue = mirrorEnglishToArabic(sourceField.value);
+        if (targetField.value === "" || targetField.value === lastAutoValue) {
+          targetField.value = nextValue;
+        }
+        lastAutoValue = nextValue;
+      };
+
+      sourceField.addEventListener("input", sync);
+      sourceField.addEventListener("change", sync);
+      sync();
+    });
+  })();
+</script>
+{% endblock %}

@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, session
 from flask_login import login_required, current_user
-from models import Driver, User, BusinessDriver, Business, BusinessID, Offboarding, DriverBusinessIDS
+from models import Driver, User, BusinessDriver, BusinessID, Offboarding, DriverBusinessIDS
 from extensions import db, mail, limiter
 from flask_mail import Message
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -10,8 +10,42 @@ from sqlalchemy import func, or_
 from flask_wtf.csrf import validate_csrf, CSRFError
 from forms.common import CSRFOnlyForm, ChangePasswordForm, OpsSupervisorApproveForm
 from services import onboarding_workflow, offboarding_workflow
+from services.rbac import require_permission, user_can_access_dashboard, user_has_permission
 
 ops_supervisor_bp = Blueprint("ops_supervisor", __name__)
+
+
+def _driver_assigned_business_choices(driver_id):
+    """Businesses this driver was already committed to by Ops Manager
+    (BusinessDriver), each with its pool of active/unassigned account IDs
+    (BusinessID) to choose from - Ops Supervisor picks the specific account,
+    it doesn't choose the platform itself."""
+    assigned_ids_subq = (
+        db.session.query(DriverBusinessIDS.business_id_id)
+        .filter(DriverBusinessIDS.transferred_at.is_(None))
+        .subquery()
+    )
+
+    links = BusinessDriver.query.filter_by(driver_id=driver_id).all()
+    choices = []
+    for link in links:
+        if not link.business:
+            continue
+        available_ids = (
+            db.session.query(BusinessID)
+            .filter(
+                BusinessID.business_id == link.business_id,
+                BusinessID.is_active == True,
+                ~BusinessID.id.in_(assigned_ids_subq.select())
+            )
+            .all()
+        )
+        choices.append({
+            "id": link.business.id,
+            "name": link.business.name,
+            "available_ids": [{"id": bid.id, "value": bid.value} for bid in available_ids],
+        })
+    return choices
 
 
 def _validate_csrf():
@@ -35,7 +69,7 @@ def _validate_csrf():
 @ops_supervisor_bp.route("/dashboard")
 @login_required
 def dashboard_ops_supervisor():
-    if current_user.role != "OpsSupervisor":
+    if not user_can_access_dashboard(current_user, "ops_supervisor.dashboard_ops_supervisor"):
         flash("Access denied", "danger")
         return redirect(url_for("auth.login"))
 
@@ -87,35 +121,13 @@ def dashboard_ops_supervisor():
     total_drivers = len(onboarding_drivers)
     total_offboardings = len(offboarding_requests)
 
-    # Prepare all businesses + only active & unassigned IDs
-    businesses = Business.query.order_by(Business.name).all()
-    all_businesses = []
-
-    # Get all assigned business IDs
-    # Only exclude IDs that are actively assigned (not yet transferred)
-    assigned_ids_subq = (
-        db.session.query(DriverBusinessIDS.business_id_id)
-        .filter(DriverBusinessIDS.transferred_at.is_(None))
-        .subquery()
-    )
-
-    for b in businesses:
-        available_ids = (
-            db.session.query(BusinessID)
-            .filter(
-                BusinessID.business_id == b.id,
-                BusinessID.is_active == True,
-                ~BusinessID.id.in_(assigned_ids_subq.select())
-            )
-            .all()
-        )
-        available_ids_list = [{"id": bid.id, "value": bid.value} for bid in available_ids]
-
-        all_businesses.append({
-            "id": b.id,
-            "name": b.name,
-            "available_ids": available_ids_list
-        })
+    # Ops Supervisor only assigns the specific account ID for whichever
+    # platform(s) Ops Manager already committed the driver to (BusinessDriver)
+    # - not a free choice of any platform, and never an additional one.
+    driver_businesses = {
+        driver.id: _driver_assigned_business_choices(driver.id)
+        for driver in onboarding_drivers
+    }
 
     return render_template(
         "dashboard_ops_supervisor.html",
@@ -123,9 +135,11 @@ def dashboard_ops_supervisor():
         total_offboardings=total_offboardings,
         onboarding_drivers=onboarding_drivers,
         offboarding_requests=offboarding_requests,
-        all_businesses=all_businesses,
+        driver_businesses=driver_businesses,
         bool=bool,
         q=q,
+        can_approve_onboarding=user_has_permission(current_user, "onboarding.ops_supervisor.approve"),
+        can_clear_offboarding=user_has_permission(current_user, "offboarding.ops_supervisor.clear"),
     )
 
 
@@ -136,17 +150,19 @@ def dashboard_ops_supervisor():
 @ops_supervisor_bp.route("/approve_driver/<int:driver_id>", methods=["POST"])
 @limiter.limit("30 per minute")
 @login_required
+@require_permission("onboarding.ops_supervisor.approve")
 def approve_driver(driver_id):
-    if current_user.role != "OpsSupervisor":
-        flash("Access denied. Ops Supervisor role required.", "danger")
-        return redirect(url_for("auth.login"))
-
     form = OpsSupervisorApproveForm()
     if not form.validate_on_submit():
         flash("Invalid or missing CSRF token. Please try again.", "danger")
         return redirect(url_for("ops_supervisor.dashboard_ops_supervisor"))
 
     driver = Driver.query.get_or_404(driver_id)
+
+    if driver.onboarding_stage != "Ops Supervisor":
+        flash(f"Driver is not in Ops Supervisor stage (current: {driver.onboarding_stage}).", "warning")
+        return redirect(url_for("ops_supervisor.dashboard_ops_supervisor"))
+
     current_app.logger.info(f"[OPS_SUPERVISOR][START] driver_id={driver_id} form={dict(request.form)}")
 
     csv_platform_ids = [pid.strip() for pid in (form.platform_ids_csv.data or "").split(",") if pid.strip()]
@@ -157,12 +173,16 @@ def approve_driver(driver_id):
     for pid in csv_platform_ids + list_platform_ids:
         if pid and pid not in platform_ids:
             platform_ids.append(pid)
-    issued_mobile_number = (form.issued_mobile_number.data or "").strip() or None
-    issued_device_id = (form.issued_device_id.data or "").strip() or None
     mobile_issued = bool(form.mobile_issued.data)
 
-    if not platform_ids:
-        flash("Please choose at least one business ID.", "danger")
+    # Ops Manager already committed this driver to specific platform(s)
+    # (BusinessDriver) - Ops Supervisor only picks the account ID for those,
+    # never a different platform. A driver with none assigned (e.g. no
+    # platform work involved) has nothing to require here.
+    assigned_business_ids = {bd.business_id for bd in BusinessDriver.query.filter_by(driver_id=driver.id).all()}
+
+    if assigned_business_ids and not platform_ids:
+        flash("Please choose the platform ID for the business(es) assigned by Ops Manager.", "danger")
         return redirect(url_for("ops_supervisor.dashboard_ops_supervisor"))
 
     try:
@@ -179,8 +199,11 @@ def approve_driver(driver_id):
         selected_business_id_ids = [int(bid.id) for bid in selected_business_ids]
         selected_business_type_ids = {int(bid.business_id) for bid in selected_business_ids if bid.business_id is not None}
 
-        if not selected_business_id_ids:
+        if platform_ids and not selected_business_id_ids:
             raise ValueError("No valid active business IDs found for submitted selection")
+
+        if selected_business_type_ids - assigned_business_ids:
+            raise ValueError("Can only assign IDs for the platform(s) selected by Ops Manager for this driver.")
 
         # -------------------------
         # Update DriverBusinessIDS (history table)
@@ -260,8 +283,6 @@ def approve_driver(driver_id):
         # -------------------------
         # Update driver info
         # -------------------------
-        driver.issued_mobile_number = issued_mobile_number
-        driver.issued_device_id = issued_device_id
         driver.mobile_issued = mobile_issued
         driver.ops_supervisor_approved_at = datetime.utcnow()
         onboarding_workflow.advance(driver, from_stage="Ops Supervisor")
@@ -306,18 +327,10 @@ def approve_driver(driver_id):
                         <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
                             <tr>
                                 <td style="padding: 8px; border: 1px solid #ddd;"><strong>Assigned Business IDs</strong></td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{', '.join(platform_ids)}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">{', '.join(platform_ids) if platform_ids else 'N/A'}</td>
                             </tr>
                             <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Issued Mobile</strong></td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver.issued_mobile_number or 'N/A'}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Issued Device</strong></td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver.issued_device_id or 'N/A'}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Mobile & SIM Issued</strong></td>
+                                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Mobile Issued</strong></td>
                                 <td style="padding: 8px; border: 1px solid #ddd;">{'✅ Yes' if mobile_issued else '❌ No'}</td>
                             </tr>
                             <tr>
@@ -339,18 +352,10 @@ def approve_driver(driver_id):
                         <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
                             <tr>
                                 <td style="padding: 8px; border: 1px solid #ddd;">أرقام الأعمال المخصصة</td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{', '.join(platform_ids)}</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">{', '.join(platform_ids) if platform_ids else 'N/A'}</td>
                             </tr>
                             <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;">الهاتف الصادر</td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver.issued_mobile_number or 'N/A'}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;">الجهاز الصادر</td>
-                                <td style="padding: 8px; border: 1px solid #ddd;">{driver.issued_device_id or 'N/A'}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px; border: 1px solid #ddd;">الهاتف والـ SIM صادر</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">تم تسليم جهاز جوال</td>
                                 <td style="padding: 8px; border: 1px solid #ddd;">{'✅ نعم' if mobile_issued else '❌ لا'}</td>
                             </tr>
                             <tr>
@@ -457,14 +462,15 @@ def offboarding_dashboard():
 # -------------------------
 @ops_supervisor_bp.route("/api/clear_offboarding/<int:offboarding_id>", methods=["POST"])
 @login_required
+@require_permission("offboarding.ops_supervisor.clear")
 def api_clear_offboarding(offboarding_id):
-    if current_user.role != "OpsSupervisor":
-        return {"success": False, "message": "Access denied"}, 403
-
     if not _validate_csrf():
         return {"success": False, "message": "Invalid CSRF token"}, 400
 
     record = Offboarding.query.get_or_404(offboarding_id)
+
+    if record.status != "OpsSupervisor":
+        return {"success": False, "message": f"Offboarding is not in Ops Supervisor stage (current: {record.status})."}, 400
 
     try:
         data = request.get_json(silent=True) or {}

@@ -11,14 +11,17 @@ import redis
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from flask import Flask, send_from_directory, session, redirect, url_for, request, make_response, g
+from flask import Flask, send_from_directory, session, redirect, url_for, request, make_response, g, flash
 from flask_limiter.errors import RateLimitExceeded
-from flask_login import logout_user
+from flask_login import logout_user, current_user
 from flask_wtf.csrf import CSRFError
+from werkzeug.exceptions import RequestEntityTooLarge
 from config import Config
 from extensions import db, mail, login_manager, migrate, csrf, babel, limiter, cache, server_session
 # Ensure models are registered with SQLAlchemy metadata for migrations
 import models  # noqa: F401
+from models import Role
+from services.rbac import user_role_names
 
 # Import blueprints
 from blueprints.public.routes import public_bp
@@ -267,6 +270,38 @@ def create_app():
         session.clear()
         return redirect(url_for("auth.login"))
 
+    @app.errorhandler(RequestEntityTooLarge)
+    def handle_request_entity_too_large(exc):
+        max_len = app.config.get("MAX_CONTENT_LENGTH", 100 * 1024 * 1024)
+        max_mb = int(max_len / (1024 * 1024))
+        message = f"Uploaded files are too large. Please keep the full request under {max_mb} MB."
+        app.logger.warning(
+            "Request entity too large",
+            extra={"path": request.path, "endpoint": request.endpoint, "max_mb": max_mb},
+        )
+        if request.accept_mimetypes.best == "application/json":
+            return {"message": message}, 413
+        if request.path == "/register":
+            flash(message, "danger")
+            return redirect(url_for("public.register"))
+        return message, 413
+
+    @app.errorhandler(403)
+    def handle_forbidden(exc):
+        app.logger.info(
+            "Forbidden", extra={"path": request.path, "endpoint": request.endpoint}
+        )
+        if request.accept_mimetypes.best == "application/json":
+            return {"message": "Access denied."}, 403
+        flash("Access denied. You don't have permission to do that.", "danger")
+        return redirect(request.referrer or url_for("auth.login"))
+
+    @app.errorhandler(401)
+    def handle_unauthorized(exc):
+        if request.accept_mimetypes.best == "application/json":
+            return {"message": "Please log in."}, 401
+        return redirect(url_for("auth.login"))
+
     @app.context_processor
     def inject_lang():
         return {
@@ -281,6 +316,95 @@ def create_app():
         return en_text if getattr(g, "current_lang", "en") == "en" else ar_text
 
     app.jinja_env.globals["tr"] = tr
+
+    # Sidebar nav, keyed by Role.dashboard_endpoint rather than a hardcoded
+    # role-string elif-chain - a user holding multiple roles (granted via
+    # the admin Access page) gets every held role's section merged into one
+    # sidebar instead of only ever seeing their single legacy primary role.
+    _NAV_CATALOG = {
+        "admin.dashboard": [
+            ("Overview", "نظرة عامة", [
+                ("Dashboard", "لوحة التحكم", "admin.dashboard", "admin", None, "grid"),
+            ]),
+            ("Manage", "الإدارة", [
+                ("Workflow Configuration", "إعداد سير العمل", "admin.workflow_config", None, "admin.workflow_config", "workflow"),
+                ("Driver Contract Templates", "قوالب عقود السائقين", "admin.contract_templates", None, "admin.contract_templates", "clipboard"),
+                ("Promissory Note Templates", "قوالب سند لأمر", "admin.promissory_note_templates", None, "admin.promissory_note_templates", "clipboard"),
+                ("Roles & Permissions", "الأدوار والصلاحيات", "admin.roles", None, "admin.roles", "shield"),
+                ("Reports", "التقارير", "reports_bp.reports", "reports_bp", None, "chart"),
+            ]),
+        ],
+        "hr.dashboard_hr": [
+            ("Overview", "نظرة عامة", [
+                ("HR Dashboard", "لوحة الموارد البشرية", "hr.dashboard_hr", "hr", None, "users"),
+            ]),
+        ],
+        "fleet.dashboard_fleet": [
+            ("Overview", "نظرة عامة", [
+                ("Fleet Dashboard", "لوحة الأسطول", "fleet.dashboard_fleet", "fleet", None, "truck"),
+            ]),
+        ],
+        "finance.dashboard_finance": [
+            ("Overview", "نظرة عامة", [
+                ("Finance Dashboard", "لوحة المالية", "finance.dashboard_finance", "finance", None, "wallet"),
+            ]),
+        ],
+        "ops_manager.dashboard_ops": [
+            ("Overview", "نظرة عامة", [
+                ("Ops Dashboard", "لوحة العمليات", "ops_manager.dashboard_ops", "ops_manager", None, "clipboard"),
+            ]),
+        ],
+        "ops_supervisor.dashboard_ops_supervisor": [
+            ("Overview", "نظرة عامة", [
+                ("Supervisor Dashboard", "لوحة المشرف", "ops_supervisor.dashboard_ops_supervisor", "ops_supervisor", None, "shield"),
+            ]),
+        ],
+        "ops_coordinator.dashboard_ops_coordinator": [
+            ("Overview", "نظرة عامة", [
+                ("Coordinator Dashboard", "لوحة المنسق", "ops_coordinator.dashboard_ops_coordinator", "ops_coordinator", None, "swap"),
+            ]),
+        ],
+    }
+
+    def current_user_nav_sections():
+        if not current_user.is_authenticated:
+            return []
+
+        endpoints = {
+            role.dashboard_endpoint
+            for role in Role.query.filter(Role.name.in_(user_role_names(current_user))).all()
+            if role.dashboard_endpoint
+        }
+
+        merged = []
+        label_index = {}
+        seen_link_endpoints = set()
+
+        for endpoint in endpoints:
+            for label_en, label_ar, links in _NAV_CATALOG.get(endpoint, []):
+                if label_en not in label_index:
+                    label_index[label_en] = len(merged)
+                    merged.append({"label": tr(label_en, label_ar), "links": []})
+                idx = label_index[label_en]
+                for name_en, name_ar, link_endpoint, blueprint, match_endpoint, icon in links:
+                    if link_endpoint in seen_link_endpoints:
+                        continue
+                    seen_link_endpoints.add(link_endpoint)
+                    merged[idx]["links"].append({
+                        "name": tr(name_en, name_ar),
+                        "endpoint": link_endpoint,
+                        "blueprint": blueprint,
+                        "match_endpoint": match_endpoint,
+                        "icon": icon,
+                    })
+
+        # Stable order: Overview-style sections before Manage-style ones,
+        # matching what each role previously saw on its own.
+        order = ["Overview", "نظرة عامة", "Manage", "الإدارة"]
+        merged.sort(key=lambda s: order.index(s["label"]) if s["label"] in order else len(order))
+        return merged
+
+    app.jinja_env.globals["current_user_nav_sections"] = current_user_nav_sections
 
     # --- Front page route ---
     @app.route("/")

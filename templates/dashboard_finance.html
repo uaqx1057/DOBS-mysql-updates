@@ -42,9 +42,10 @@
 <div data-tab-panel="offboarding" class="tab-panel" hidden>
   <div class="driver-cards">
     {% for o in offboarding_requests %}
-    <div class="driver-card reveal" data-off-id="{{ o.id }}" data-off-name="{{ o.driver.name if o.driver else '' }}">
+    <div class="driver-card reveal" data-off-id="{{ o.id }}" data-off-name="{{ o.driver.name if o.driver else '' }}" data-dms-balance="{{ dms_balances.get(o.id, 0) }}" data-penalty="{{ o.ops_supervisor_penalty_amount or 0 }}" data-damage="{{ o.fleet_damage_cost or 0 }}">
       <h3>{{ o.driver.name if o.driver else tr('Unknown driver', 'سائق غير معروف') }}</h3>
       <p>{{ tr('Iqama', 'الإقامة') }}: {{ o.driver.iqaama_number if o.driver else '' }}</p>
+      <p>{{ tr('DMS Payroll Balance', 'رصيد الرواتب من دي إم إس') }}: <strong>{{ '%.2f'|format(dms_balances.get(o.id, 0)) }} SAR</strong></p>
       <p><span class="badge-soft warning">{{ o.status }}</span></p>
     </div>
     {% else %}
@@ -81,7 +82,9 @@
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
+        {% if can_approve_onboarding %}
         <button type="submit" class="btn btn-primary">{{ tr('Clear', 'تصفية') }}</button>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -94,13 +97,17 @@
     <form id="offClearForm" method="POST" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="modal-body">
-        <label class="form-label">{{ tr('Adjustments (SAR)', 'التسويات') }}</label><input class="form-control mb-3" name="finance_adjustments" placeholder="0">
+        <div id="offClearDmsBalance" class="mb-3 p-2 text-secondary small" style="border-radius:var(--radius-md); background:var(--bg-subtle);"></div>
+        <label class="form-label">{{ tr('Adjustments (SAR)', 'التسويات') }}</label><input class="form-control mb-3" name="finance_adjustments" id="offClearAdjustments" placeholder="0" value="0">
         <label class="form-label">{{ tr('Note', 'ملاحظة') }}</label><textarea class="form-control mb-3" name="finance_note" rows="2"></textarea>
         <label class="form-label">{{ tr('Invoice File', 'ملف الفاتورة') }}</label><input type="file" class="form-control" name="finance_invoice_file" accept=".jpg,.jpeg,.png,.pdf">
+        <div id="offClearNetPreview" class="mt-2 small fw-semibold"></div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
+        {% if can_clear_offboarding %}
         <button type="submit" class="btn btn-primary">{{ tr('Clear', 'تصفية') }}</button>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -137,10 +144,35 @@
     });
   });
 
+  function updateOffClearPreview(dmsBalance, penalty, damage) {
+    var adjustments = parseFloat(document.getElementById('offClearAdjustments').value) || 0;
+    var net = dmsBalance - penalty - damage - adjustments;
+    var label = net > 0
+      ? ({{ tr('Company owes driver', 'الشركة مدينة للسائق') | tojson }})
+      : (net < 0 ? ({{ tr('Driver owes company', 'السائق مدين للشركة') | tojson }}) : ({{ tr('Even — no balance', 'متعادل — لا يوجد رصيد') | tojson }}));
+    document.getElementById('offClearNetPreview').textContent =
+      ({{ tr('Net Settlement', 'صافي التسوية') | tojson }}) + ': ' + Math.abs(net).toFixed(2) + ' SAR — ' + label;
+  }
+
   document.querySelectorAll('[data-tab-panel="offboarding"] .driver-card').forEach(function (card) {
     card.addEventListener('click', function () {
+      var dmsBalance = parseFloat(card.dataset.dmsBalance) || 0;
+      var penalty = parseFloat(card.dataset.penalty) || 0;
+      var damage = parseFloat(card.dataset.damage) || 0;
+
       document.getElementById('offClearTitle').textContent = ({{ tr('Financial Offboarding Check', 'الفحص المالي للخروج') | tojson }}) + ' — ' + card.dataset.offName;
       document.getElementById('offClearForm').action = '/dashboard/finance/offboarding/clear/' + card.dataset.offId;
+      document.getElementById('offClearDmsBalance').innerHTML =
+        '<strong>{{ tr("DMS Payroll Balance", "رصيد الرواتب من دي إم إس") }}:</strong> ' + dmsBalance.toFixed(2) + ' SAR' +
+        '<br><strong>{{ tr("Ops Supervisor Penalty", "غرامة مشرف العمليات") }}:</strong> ' + penalty.toFixed(2) + ' SAR' +
+        '<br><strong>{{ tr("Fleet Damage Cost", "تكلفة أضرار الأسطول") }}:</strong> ' + damage.toFixed(2) + ' SAR';
+      document.getElementById('offClearAdjustments').value = '0';
+      updateOffClearPreview(dmsBalance, penalty, damage);
+
+      document.getElementById('offClearAdjustments').oninput = function () {
+        updateOffClearPreview(dmsBalance, penalty, damage);
+      };
+
       DobsUI.openModal('offClearModal');
     });
   });

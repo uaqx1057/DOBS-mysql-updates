@@ -16,59 +16,7 @@
 <body class="app-body {% block body_class %}{% endblock %}">
 {% block navbar %}
 {% if current_user.is_authenticated %}
-{% set role_key = (current_user.role or '') | lower | replace(' ', '') | replace('-', '') | replace('_', '') %}
-{% set nav_sections = [] %}
-{% if role_key == 'superadmin' %}
-  {% set nav_sections = [
-    {'label': tr('Overview', 'نظرة عامة'), 'links': [
-      {'name': tr('Dashboard', 'لوحة التحكم'), 'endpoint': 'admin.dashboard', 'blueprint': 'admin', 'icon': 'grid'},
-    ]},
-    {'label': tr('Manage', 'الإدارة'), 'links': [
-      {'name': tr('Workflow & Contracts', 'سير العمل والعقود'), 'endpoint': 'admin.workflow_config', 'blueprint': None, 'match_endpoint': 'admin.workflow_config', 'icon': 'workflow'},
-      {'name': tr('Roles & Permissions', 'الأدوار والصلاحيات'), 'endpoint': 'admin.roles', 'blueprint': None, 'match_endpoint': 'admin.roles', 'icon': 'shield'},
-      {'name': tr('Reports', 'التقارير'), 'endpoint': 'reports_bp.reports', 'blueprint': 'reports_bp', 'icon': 'chart'},
-    ]},
-  ] %}
-{% elif role_key == 'hr' %}
-  {% set nav_sections = [
-    {'label': tr('Overview', 'نظرة عامة'), 'links': [
-      {'name': tr('HR Dashboard', 'لوحة الموارد البشرية'), 'endpoint': 'hr.dashboard_hr', 'blueprint': 'hr', 'icon': 'users'},
-    ]},
-    {'label': tr('Manage', 'الإدارة'), 'links': [
-      {'name': tr('Reports', 'التقارير'), 'endpoint': 'reports_bp.reports', 'blueprint': 'reports_bp', 'icon': 'chart'},
-    ]},
-  ] %}
-{% elif role_key == 'fleetmanager' %}
-  {% set nav_sections = [
-    {'label': tr('Overview', 'نظرة عامة'), 'links': [
-      {'name': tr('Fleet Dashboard', 'لوحة الأسطول'), 'endpoint': 'fleet.dashboard_fleet', 'blueprint': 'fleet', 'icon': 'truck'},
-    ]},
-  ] %}
-{% elif role_key == 'financemanager' %}
-  {% set nav_sections = [
-    {'label': tr('Overview', 'نظرة عامة'), 'links': [
-      {'name': tr('Finance Dashboard', 'لوحة المالية'), 'endpoint': 'finance.dashboard_finance', 'blueprint': 'finance', 'icon': 'wallet'},
-    ]},
-  ] %}
-{% elif role_key == 'opsmanager' %}
-  {% set nav_sections = [
-    {'label': tr('Overview', 'نظرة عامة'), 'links': [
-      {'name': tr('Ops Dashboard', 'لوحة العمليات'), 'endpoint': 'ops_manager.dashboard_ops', 'blueprint': 'ops_manager', 'icon': 'clipboard'},
-    ]},
-  ] %}
-{% elif role_key == 'opssupervisor' %}
-  {% set nav_sections = [
-    {'label': tr('Overview', 'نظرة عامة'), 'links': [
-      {'name': tr('Supervisor Dashboard', 'لوحة المشرف'), 'endpoint': 'ops_supervisor.dashboard_ops_supervisor', 'blueprint': 'ops_supervisor', 'icon': 'shield'},
-    ]},
-  ] %}
-{% elif role_key == 'opscoordinator' %}
-  {% set nav_sections = [
-    {'label': tr('Overview', 'نظرة عامة'), 'links': [
-      {'name': tr('Coordinator Dashboard', 'لوحة المنسق'), 'endpoint': 'ops_coordinator.dashboard_ops_coordinator', 'blueprint': 'ops_coordinator', 'icon': 'swap'},
-    ]},
-  ] %}
-{% endif %}
+{% set nav_sections = current_user_nav_sections() %}
 
 <div class="app-shell" id="appShell" data-sidebar-state="expanded">
   <aside class="app-sidebar" id="appSidebar">
@@ -180,6 +128,20 @@
         </div>
       </div>
     </header>
+
+    {% if session.get('impersonator_id') %}
+    <div class="impersonation-banner">
+      <span>
+        {{ tr('Viewing as', 'تعرض كـ') }}
+        <strong>{{ current_user.name or current_user.username }}</strong>
+        ({{ current_user.role }})
+      </span>
+      <form method="post" action="{{ url_for('auth.stop_impersonation') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-sm btn-light">{{ tr('Return to my account', 'العودة إلى حسابي') }}</button>
+      </form>
+    </div>
+    {% endif %}
 
     <main class="app-content {% block content_class %}{% endblock %}">
       {% with messages = get_flashed_messages(with_categories=true) %}

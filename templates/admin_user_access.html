@@ -3,6 +3,12 @@
 {% block title %}{{ tr('Access', 'الصلاحيات') }} — {{ user.username }} — DOBS{% endblock %}
 {% block navbar_title %}{{ tr('Access', 'الصلاحيات') }} — {{ user.name or user.username }}{% endblock %}
 {% block navbar_actions %}
+{% if can_impersonate and user.id != current_user.id %}
+<form method="post" action="{{ url_for('admin.impersonate_user', user_id=user.id) }}" class="d-inline">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="btn btn-sm btn-outline-warning">{{ tr('Impersonate', 'انتحال الهوية') }}</button>
+</form>
+{% endif %}
 <a href="{{ url_for('admin.dashboard') }}" class="nav-btn">&larr; {{ tr('Back to Dashboard', 'العودة للوحة التحكم') }}</a>
 {% endblock %}
 

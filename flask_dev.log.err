@@ -1,10 +1,50 @@
 WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
  * Running on http://127.0.0.1:5000
 Press CTRL+C to quit
-127.0.0.1 - - [08/Jul/2026 12:05:43] "GET /login HTTP/1.1" 200 -
-[2026-07-08 12:05:43,538] INFO in routes: login_success
-[2026-07-08 12:05:43,544] INFO in routes: login_redirect
-127.0.0.1 - - [08/Jul/2026 12:05:43] "POST /login HTTP/1.1" 302 -
-127.0.0.1 - - [08/Jul/2026 12:05:44] "GET /dashboard/ HTTP/1.1" 200 -
-127.0.0.1 - - [08/Jul/2026 12:05:44] "GET /dashboard/roles HTTP/1.1" 200 -
-127.0.0.1 - - [08/Jul/2026 12:05:44] "GET /dashboard/roles/8/permissions HTTP/1.1" 200 -
+127.0.0.1 - - [09/Jul/2026 21:50:22] "GET /dashboard/contract-templates?action=new HTTP/1.1" 302 -
+127.0.0.1 - - [09/Jul/2026 21:50:22] "GET /login?next=/dashboard/contract-templates?action%3Dnew HTTP/1.1" 200 -
+127.0.0.1 - - [09/Jul/2026 21:50:22] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [09/Jul/2026 21:50:38] "GET /dashboard/workflow-config HTTP/1.1" 200 -
+127.0.0.1 - - [09/Jul/2026 21:50:38] "GET /static/vendor/bootstrap/bootstrap.min.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:38] "GET /static/js/dobs-ui.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:38] "GET /static/js/dobs-ui.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:38] "GET /static/css/animations.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:38] "GET /static/DOBS.png HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:38] "GET /static/vendor/bootstrap/bootstrap.bundle.min.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:38] "GET /static/css/tokens.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:38] "GET /static/css/components.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:38] "GET /static/vendor/bootstrap/bootstrap.bundle.min.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:39] "GET /static/DOBS.png HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:41] "GET /dashboard/contract-templates HTTP/1.1" 200 -
+127.0.0.1 - - [09/Jul/2026 21:50:41] "GET /static/vendor/bootstrap/bootstrap.bundle.min.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:41] "GET /static/vendor/bootstrap/bootstrap.min.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:41] "GET /static/css/components.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:41] "GET /static/css/tokens.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:41] "GET /static/DOBS.png HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:41] "GET /static/css/animations.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:41] "GET /static/vendor/bootstrap/bootstrap.bundle.min.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:41] "GET /static/js/dobs-ui.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:42] "GET /static/js/dobs-ui.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:45] "GET /dashboard/contract-templates?action=new HTTP/1.1" 200 -
+127.0.0.1 - - [09/Jul/2026 21:50:45] "GET /static/css/animations.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:45] "GET /static/DOBS.png HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:45] "GET /static/css/components.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:45] "GET /static/vendor/bootstrap/bootstrap.min.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:45] "GET /static/vendor/bootstrap/bootstrap.bundle.min.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:45] "GET /static/css/tokens.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:45] "GET /static/vendor/bootstrap/bootstrap.bundle.min.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:45] "GET /static/js/dobs-ui.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:50:45] "GET /static/js/dobs-ui.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:51:05] "POST /dashboard/workflow-config/contract-template/add HTTP/1.1" 302 -
+127.0.0.1 - - [09/Jul/2026 21:51:05] "GET /dashboard/contract-templates HTTP/1.1" 200 -
+127.0.0.1 - - [09/Jul/2026 21:51:06] "GET /static/vendor/bootstrap/bootstrap.min.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:51:06] "GET /static/css/animations.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:51:06] "GET /static/DOBS.png HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:51:06] "GET /static/css/components.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:51:06] "GET /static/vendor/bootstrap/bootstrap.bundle.min.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:51:06] "GET /static/css/tokens.css HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:51:06] "GET /static/js/dobs-ui.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:51:07] "GET /static/vendor/bootstrap/bootstrap.bundle.min.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:51:07] "GET /static/js/dobs-ui.js HTTP/1.1" 304 -
+127.0.0.1 - - [09/Jul/2026 21:51:10] "GET /dashboard/workflow-config/contract-template/1/preview HTTP/1.1" 200 -
+127.0.0.1 - - [09/Jul/2026 21:51:11] "GET /favicon.ico HTTP/1.1" 404 -

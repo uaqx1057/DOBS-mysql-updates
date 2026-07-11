@@ -22,7 +22,9 @@
   <div class="driver-card reveal" style="cursor:default;" data-search="{{ driver.name }} {{ driver.iqaama_number }}">
     <h3>{{ driver.name }}</h3>
     <p>{{ tr('Iqama', 'الإقامة') }}: {{ driver.iqaama_number }}</p>
+    {% if can_request_offboarding %}
     <button type="button" class="btn btn-sm btn-outline-danger mt-2" data-request-offboarding="{{ driver.id }}" data-driver-name="{{ driver.name }}">{{ tr('Request Offboarding', 'طلب الخروج') }}</button>
+    {% endif %}
   </div>
   {% else %}
   <p class="text-muted">{{ tr('No fully onboarded drivers available.', 'لا يوجد سائقون مكتملو الانضمام.') }}</p>

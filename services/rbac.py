@@ -41,6 +41,22 @@ def user_has_role(user, *role_names) -> bool:
     return bool(user_role_names(user) & set(role_names))
 
 
+def user_can_access_dashboard(user, endpoint_name: str) -> bool:
+    """True if any role the user holds (legacy primary role or an extra
+    UserRole grant) is configured to land on `endpoint_name`. Backs every
+    dashboard route's guard so a user granted an extra role can actually
+    reach that role's dashboard, not just get offered it on the role picker."""
+    role_names = user_role_names(user)
+    if not role_names:
+        return False
+    match = (
+        Role.query
+        .filter(Role.name.in_(role_names), Role.dashboard_endpoint == endpoint_name)
+        .first()
+    )
+    return match is not None
+
+
 def user_has_permission(user, code: str) -> bool:
     override = (
         UserPermission.query

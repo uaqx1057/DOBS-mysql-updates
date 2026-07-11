@@ -142,6 +142,12 @@
       <div class="d-flex gap-2">
         <button type="button" class="btn btn-sm btn-outline-secondary" data-edit-user='{{ user | tojson }}'>{{ tr('Edit', 'تعديل') }}</button>
         <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.user_access', user_id=user.get('id')) }}">{{ tr('Access', 'الصلاحيات') }}</a>
+        {% if can_impersonate and user.get('id') != current_user.id %}
+        <form method="POST" action="{{ url_for('admin.impersonate_user', user_id=user.get('id')) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-sm btn-outline-warning">{{ tr('Impersonate', 'انتحال الهوية') }}</button>
+        </form>
+        {% endif %}
         <form method="POST" action="{{ url_for('admin.delete_user', user_id=user.get('id')) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('{{ tr('Delete this user?', 'حذف هذا المستخدم؟') }}')">{{ tr('Delete', 'حذف') }}</button>
@@ -247,7 +253,10 @@
       <div class="modal-body">
         <label class="form-label">{{ tr('Username', 'اسم المستخدم') }}</label><input class="form-control mb-3" name="username" required>
         <div id="userPasswordField"><label class="form-label">{{ tr('Password', 'كلمة المرور') }}</label><input type="password" class="form-control mb-3" name="password"></div>
-        <label class="form-label">{{ tr('Role', 'الدور') }}</label><input class="form-control mb-3" name="role" required>
+        <label class="form-label">{{ tr('Role', 'الدور') }}</label>
+        <select class="form-select mb-3" name="role" required>
+          {% for r in all_roles %}<option value="{{ r.name }}">{{ r.name }}</option>{% endfor %}
+        </select>
         <label class="form-label">{{ tr('Name', 'الاسم') }}</label><input class="form-control mb-3" name="name">
         <label class="form-label">{{ tr('Designation', 'المسمى الوظيفي') }}</label><input class="form-control mb-3" name="designation">
         <label class="form-label">{{ tr('Branch City', 'مدينة الفرع') }}</label><input class="form-control mb-3" name="branch_city">

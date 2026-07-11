@@ -84,13 +84,17 @@
         </div>
         <div class="d-flex gap-2">
           {% if driver.records|length == 0 or driver.current_stage == 'Requested' %}
-          <form action="{{ url_for('ops_manager.request_offboarding', driver_id=driver.id) }}" method="POST">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-primary btn-sm">
-              {{ tr('Approve Offboarding Request', 'الموافقة على طلب الخروج') if driver.records|length > 0 else tr('Request Offboarding', 'طلب الخروج') }}
-            </button>
-          </form>
-          <button type="button" class="btn btn-danger btn-sm" data-reject-offboarding="{{ driver.id }}">{{ tr('Reject', 'رفض') }}</button>
+            {% if can_approve_offboarding %}
+            <form action="{{ url_for('ops_manager.request_offboarding', driver_id=driver.id) }}" method="POST">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-primary btn-sm">
+                {{ tr('Approve Offboarding Request', 'الموافقة على طلب الخروج') if driver.records|length > 0 else tr('Request Offboarding', 'طلب الخروج') }}
+              </button>
+            </form>
+            <button type="button" class="btn btn-danger btn-sm" data-reject-offboarding="{{ driver.id }}">{{ tr('Reject', 'رفض') }}</button>
+            {% else %}
+            <span class="badge-soft neutral">{{ tr('View only', 'عرض فقط') }}</span>
+            {% endif %}
           {% else %}
           <span class="badge-soft warning pulse">{{ tr('In progress', 'قيد التنفيذ') }}</span>
           {% endif %}
@@ -171,23 +175,33 @@
         </div>
 
         <label class="form-label">{{ tr('Driver Type', 'نوع السائق') }}</label>
-        <select class="form-select mb-3" name="driver_type_id" required>
-          {% for dt in driver_types %}<option value="{{ dt.id }}">{{ dt.name }}</option>{% endfor %}
+        <select class="form-select mb-3" id="driverTypeSelect" name="driver_type_id" required>
+          {% for dt in driver_types %}<option value="{{ dt.id }}" data-freelancer="{{ 'true' if dt.is_freelancer else 'false' }}">{{ dt.name }}</option>{% endfor %}
         </select>
 
         <label class="form-label">{{ tr('Will the company provide a vehicle?', 'هل ستوفر الشركة مركبة؟') }}</label>
-        <select class="form-select mb-3" name="will_provide_vehicle">
+        <select class="form-select mb-3" id="willProvideVehicleSelect" name="will_provide_vehicle">
           <option value="false">{{ tr('No — driver arranges their own', 'لا — السائق يوفر مركبته الخاصة') }}</option>
           <option value="true">{{ tr('Yes — company will provide a vehicle', 'نعم — ستوفر الشركة مركبة') }}</option>
         </select>
+        <p class="text-muted small mb-3" id="vehicleAutoNote" hidden>{{ tr('Sponsored driver types always get a company vehicle.', 'السائق المكفول تحصل دائمًا على مركبة من الشركة.') }}</p>
+
+        <label class="form-label" id="platformLabel">{{ tr('Platform', 'المنصة') }}</label>
+        <select class="form-select mb-3" id="platformSelect" name="platform_business_id">
+          <option value="">{{ tr('— Select platform —', '— اختر المنصة —') }}</option>
+          {% for biz in platforms %}<option value="{{ biz.id }}">{{ biz.name }}</option>{% endfor %}
+        </select>
+        <p class="text-muted small mb-3" id="platformHelp">{{ tr('Which platform this driver will work for - HR uses this to generate the matching platform contract for freelancers.', 'المنصة التي سيعمل عليها السائق - تستخدمها الموارد البشرية لإنشاء عقد المنصة المناسب للعاملين لحسابهم الخاص.') }}</p>
 
         <label class="form-label">{{ tr('Note (optional)', 'ملاحظة (اختياري)') }}</label>
         <textarea class="form-control" name="ops_note" rows="2"></textarea>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
+        {% if can_approve_onboarding %}
         <button type="button" class="btn btn-danger" id="rejectBtn">{{ tr('Reject', 'رفض') }}</button>
         <button type="submit" class="btn btn-primary">{{ tr('Approve & Send to HR', 'الموافقة وإرسال للموارد البشرية') }}</button>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -268,6 +282,34 @@
   var licenseYes = {{ tr('Yes', 'نعم') | tojson }};
   var licenseNo = {{ tr('No', 'لا') | tojson }};
 
+  var driverTypeSelect = document.getElementById('driverTypeSelect');
+  var vehicleSelect = document.getElementById('willProvideVehicleSelect');
+  var vehicleAutoNote = document.getElementById('vehicleAutoNote');
+  var platformSelect = document.getElementById('platformSelect');
+  var platformLabel = document.getElementById('platformLabel');
+
+  function syncDriverTypeDependentFields() {
+    var opt = driverTypeSelect.options[driverTypeSelect.selectedIndex];
+    var isFreelancer = !!opt && opt.getAttribute('data-freelancer') === 'true';
+
+    if (isFreelancer) {
+      vehicleSelect.disabled = false;
+      vehicleAutoNote.hidden = true;
+      platformSelect.required = true;
+      platformLabel.textContent = platformLabel.textContent.replace(' *', '') + ' *';
+    } else {
+      vehicleSelect.value = 'true';
+      vehicleSelect.disabled = true;
+      vehicleAutoNote.hidden = false;
+      platformSelect.required = false;
+      platformLabel.textContent = platformLabel.textContent.replace(' *', '');
+    }
+  }
+
+  if (driverTypeSelect) {
+    driverTypeSelect.addEventListener('change', syncDriverTypeDependentFields);
+  }
+
   document.querySelectorAll('#onboardingCards .driver-card').forEach(function (card) {
     card.addEventListener('click', function () {
       var d = {};
@@ -282,16 +324,22 @@
       document.getElementById('d_license').textContent = d.saudi_driving_license ? licenseYes : licenseNo;
       document.getElementById('d_city').textContent = d.city || '—';
       document.getElementById('driverApproveForm').action = '/dashboard/ops/approve_driver/' + d.id;
+      if (driverTypeSelect) driverTypeSelect.selectedIndex = 0;
+      if (platformSelect) platformSelect.value = '';
+      syncDriverTypeDependentFields();
       DobsUI.openModal('driverModal');
     });
   });
 
-  document.getElementById('rejectBtn').addEventListener('click', function () {
-    if (!currentDriverId) return;
-    DobsUI.closeModal('driverModal');
-    document.getElementById('rejectForm').action = '/dashboard/ops/reject_driver/' + currentDriverId;
-    DobsUI.openModal('rejectModal');
-  });
+  var rejectBtn = document.getElementById('rejectBtn');
+  if (rejectBtn) {
+    rejectBtn.addEventListener('click', function () {
+      if (!currentDriverId) return;
+      DobsUI.closeModal('driverModal');
+      document.getElementById('rejectForm').action = '/dashboard/ops/reject_driver/' + currentDriverId;
+      DobsUI.openModal('rejectModal');
+    });
+  }
 
   document.querySelectorAll('[data-reject-offboarding]').forEach(function (btn) {
     btn.addEventListener('click', function () {

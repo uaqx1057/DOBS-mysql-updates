@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="{{ current_lang }}" dir="{{ text_direction }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{{ tr('No dashboard configured', 'لا توجد لوحة تحكم مُعينة') }} — DOBS</title>
+  <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='Home_09_Onepage_files/logo1.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/animations.css') }}">
+  <style>
+    body { min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--bg-page); }
+    .wrap { max-width:480px; width:100%; padding:var(--space-6); text-align:center; }
+    .wrap .card { padding:var(--space-8) var(--space-6); }
+    .logout-link { display:block; text-align:center; margin-top:var(--space-6); color:var(--text-secondary); font-size:var(--text-sm); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card reveal">
+      <h1 class="page-title mb-2">{{ tr('No dashboard configured', 'لا توجد لوحة تحكم مُعينة') }}</h1>
+      <p class="text-secondary">
+        {{ tr('Your account role', 'دور حسابك') }} (<strong>{{ role_names | join(', ') }}</strong>)
+        {{ tr("doesn't have a dashboard assigned yet. This is a setup step your administrator needs to complete from the Roles & Permissions screen.", 'لم يُعيّن له لوحة تحكم بعد. هذه خطوة إعداد يحتاج المسؤول لإكمالها من شاشة الأدوار والصلاحيات.') }}
+      </p>
+    </div>
+    <a class="logout-link" href="{{ url_for('auth.logout') }}">{{ tr('Log out', 'تسجيل الخروج') }}</a>
+  </div>
+</body>
+</html>

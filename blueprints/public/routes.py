@@ -84,6 +84,28 @@ def _validate_upload(file_storage, label: str) -> bool:
     return True
 
 
+def _validate_upload(file_storage, label: str) -> bool:
+    if not file_storage or not file_storage.filename:
+        flash(f"{label} upload is required.", "danger")
+        return False
+
+    content_type = (file_storage.mimetype or "").lower()
+    if not (content_type.startswith("image/") or content_type == "application/pdf"):
+        flash(f"Invalid file content for {label}. Only images or PDF are accepted.", "danger")
+        return False
+
+    max_len = current_app.config.get("MAX_CONTENT_LENGTH", 100 * 1024 * 1024)
+    file_storage.stream.seek(0, os.SEEK_END)
+    file_size = file_storage.stream.tell()
+    file_storage.stream.seek(0)
+    if file_size > max_len:
+        max_mb = int(max_len / (1024 * 1024))
+        flash(f"{label} file too large. Maximum {max_mb} MB.", "danger")
+        return False
+
+    return True
+
+
 def _save_upload(file_storage, upload_folder: str, safe_name: str) -> str:
     ext = file_storage.filename.rsplit(".", 1)[1].lower()
     file_name = secure_filename(f"{safe_name}.{ext}")

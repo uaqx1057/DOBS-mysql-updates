@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tr('Driver Contract Templates', 'قوالب عقود السائقين') }} - DOBS{% endblock %}
+{% block navbar_title %}{{ tr('Driver Contract Templates', 'قوالب عقود السائقين') }}{% endblock %}
+{% block navbar_actions %}
+<a href="{{ url_for('admin.dashboard') }}" class="nav-btn">&larr; {{ tr('Back to Dashboard', 'العودة للوحة التحكم') }}</a>
+<a href="{{ url_for('admin.workflow_config') }}" class="nav-btn">{{ tr('Workflow Configuration', 'إعداد سير العمل') }}</a>
+{% endblock %}
+
+{% block content %}
+<div class="page-header reveal">
+  <h1 class="page-title">{{ tr('Driver Contract Templates', 'قوالب عقود السائقين') }}</h1>
+  <p class="page-subtitle">{{ tr('Manage reusable contract templates for each driver type and platform. Company-side identity and signatory defaults are prefilled to keep template creation consistent.', 'إدارة قوالب العقود القابلة لإعادة الاستخدام لكل نوع سائق ومنصة. يتم تعبئة بيانات الطرف الأول والمفوّض بالتوقيع تلقائيًا للحفاظ على الاتساق.') }}</p>
+</div>
+
+<div class="card reveal mb-4">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+    <div>
+      <h4 class="fs-5 mb-1">{{ tr('Contracts List', 'قائمة القوالب') }}</h4>
+      <p class="text-muted mb-0">{{ tr('Review existing templates, preview them, and manage active versions.', 'راجع القوالب الحالية، عاينها، وأدر النسخ النشطة.') }}</p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="{{ url_for('admin.contract_templates', action='new') }}#template-form" class="btn btn-primary">{{ tr('Add New Contract', 'إضافة عقد جديد') }}</a>
+      {% if show_contract_form %}
+      <a href="{{ url_for('admin.contract_templates') }}" class="btn btn-light">{{ tr('Close Form', 'إغلاق النموذج') }}</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card reveal mb-4">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>{{ tr('Name', 'الاسم') }}</th>
+          <th>{{ tr('Business', 'النشاط') }}</th>
+          <th>{{ tr('Driver Type', 'نوع السائق') }}</th>
+          <th>{{ tr('Target', 'الهدف') }}</th>
+          <th>{{ tr('Salary', 'الراتب') }}</th>
+          <th>{{ tr('First Party', 'الطرف الأول') }}</th>
+          <th>{{ tr('Signatory', 'الموقّع') }}</th>
+          <th>{{ tr('Status', 'الحالة') }}</th>
+          <th>{{ tr('Actions', 'الإجراءات') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tpl in contract_templates %}
+        <tr>
+          <td>
+            <div class="fw-semibold">{{ tpl.name }}</div>
+            <div class="text-muted small">{{ tpl.updated_at.strftime('%Y-%m-%d %H:%M') if tpl.updated_at else '-' }}</div>
+          </td>
+          <td>{{ tpl.business.name if tpl.business else tr('Generic', 'عام') }}</td>
+          <td>{{ tpl.driver_type.name if tpl.driver_type else tr('Any', 'أي') }}</td>
+          <td>{{ tpl.target_orders or '-' }}</td>
+          <td>{{ tpl.target_salary or '-' }}</td>
+          <td>
+            <div>{{ tpl.first_party_name or contract_defaults.first_party_name }}</div>
+            <div class="text-muted small">{{ tpl.first_party_label or contract_defaults.first_party_label }}</div>
+          </td>
+          <td>
+            <div>{{ tpl.company_signatory_name or contract_defaults.company_signatory_name }}</div>
+            <div class="text-muted small">{{ tpl.company_signatory_title or contract_defaults.company_signatory_title }}</div>
+          </td>
+          <td><span class="badge-soft {{ 'success' if tpl.is_active else 'danger' }}">{{ tr('Active', 'نشط') if tpl.is_active else tr('Inactive', 'غير نشط') }}</span></td>
+          <td class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.preview_contract_template', template_id=tpl.id) }}" target="_blank">{{ tr('Preview', 'معاينة') }}</a>
+            <a class="btn btn-sm btn-outline-info" href="{{ url_for('admin.contract_templates', edit_template_id=tpl.id) }}#template-form">{{ tr('Edit', 'تعديل') }}</a>
+            <form method="post" action="{{ url_for('admin.toggle_contract_template', template_id=tpl.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary" type="submit">{{ tr('Deactivate', 'إلغاء التفعيل') if tpl.is_active else tr('Activate', 'تفعيل') }}</button>
+            </form>
+            <form method="post" action="{{ url_for('admin.delete_contract_template', template_id=tpl.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-danger" type="submit" onclick="return confirm('{{ tr('Delete this template?', 'حذف هذا القالب؟') }}');">{{ tr('Delete', 'حذف') }}</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="9" class="text-center text-muted py-4">{{ tr('No contract templates have been created yet.', 'لم يتم إنشاء أي قالب عقد بعد.') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if show_contract_form %}
+<div class="card reveal" id="template-form">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+    <div>
+      <h4 class="fs-5 mb-1">
+        {% if editing_template %}
+          {{ tr('Edit Contract Template', 'تعديل قالب العقد') }}
+        {% else %}
+          {{ tr('Add New Contract Template', 'إضافة قالب عقد جديد') }}
+        {% endif %}
+      </h4>
+      <p class="text-muted mb-0">
+        {% if editing_template %}
+          {{ tr('Update the template fields, company party details, and payout rules below.', 'قم بتحديث الحقول وبيانات الطرف الأول وقواعد المبالغ أدناه.') }}
+        {% else %}
+          {{ tr('Start with the company preset, then complete the business and driver-specific terms.', 'ابدأ بالإعدادات الافتراضية للطرف الأول ثم أكمل الشروط الخاصة بالنشاط ونوع السائق.') }}
+        {% endif %}
+      </p>
+    </div>
+    <div class="border rounded px-3 py-2 bg-light">
+      <div class="small text-muted mb-2">{{ tr('Company preset', 'إعداد الشركة الافتراضي') }}</div>
+      <form method="post" action="{{ url_for('admin.save_company_preset') }}" class="d-flex flex-column gap-2" style="min-width: 260px;">
+        {{ company_preset_form.hidden_tag() }}
+        <input type="hidden" name="redirect_to" value="contract">
+        {{ company_preset_form.first_party_name(class_="form-control form-control-sm", placeholder=tr('First party name', 'اسم الطرف الأول')) }}
+        {{ company_preset_form.company_signatory_name(class_="form-control form-control-sm", placeholder=tr('Signatory name', 'اسم الموقّع')) }}
+        {{ company_preset_form.company_signatory_title(class_="form-control form-control-sm", placeholder=tr('Signatory title', 'صفة الموقّع')) }}
+        <details class="small">
+          <summary class="text-muted" style="cursor:pointer;">{{ tr('More fields', 'المزيد من الحقول') }}</summary>
+          <div class="d-flex flex-column gap-2 pt-2">
+            {{ company_preset_form.first_party_name_ar(class_="form-control form-control-sm", placeholder=tr('First party name (Arabic)', 'اسم الطرف الأول بالعربية')) }}
+            {{ company_preset_form.first_party_label(class_="form-control form-control-sm", placeholder=tr('First party label', 'وصف الطرف الأول')) }}
+            {{ company_preset_form.first_party_label_ar(class_="form-control form-control-sm", placeholder=tr('First party label (Arabic)', 'وصف الطرف الأول بالعربية')) }}
+            {{ company_preset_form.second_party_label(class_="form-control form-control-sm", placeholder=tr('Second party label', 'وصف الطرف الثاني')) }}
+            {{ company_preset_form.second_party_label_ar(class_="form-control form-control-sm", placeholder=tr('Second party label (Arabic)', 'وصف الطرف الثاني بالعربية')) }}
+          </div>
+        </details>
+        <button class="btn btn-sm btn-outline-primary" type="submit">{{ tr('Save Preset', 'حفظ الإعداد') }}</button>
+      </form>
+    </div>
+  </div>
+
+  <form class="row g-3" method="post" action="{{ url_for('admin.update_contract_template', template_id=editing_template.id) if editing_template else url_for('admin.add_contract_template') }}">
+    {{ contract_form.hidden_tag() }}
+
+    <div class="col-12">
+      <h5 class="fs-6 fw-semibold text-secondary text-uppercase mb-3">{{ tr('Template Identity', 'هوية القالب') }}</h5>
+    </div>
+    <div class="col-md-4"><label class="form-label">{{ tr('Template Name', 'اسم القالب') }}</label>{{ contract_form.name(class_="form-control") }}</div>
+    <div class="col-md-4">
+      <label class="form-label">{{ tr('Business (blank = generic)', 'النشاط (فارغ = عام)') }}</label>
+      <select name="business_id" class="form-select">
+        <option value="">- {{ tr('Generic', 'عام') }} -</option>
+        {% for b in businesses %}
+        <option value="{{ b.id }}" {% if editing_template and editing_template.business_id == b.id %}selected{% endif %}>{{ b.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4"><label class="form-label">{{ tr('Driver Type ID (blank = any)', 'رقم نوع السائق (فارغ = أي)') }}</label>{{ contract_form.driver_type_id(class_="form-control") }}</div>
+
+    <div class="col-12 pt-2">
+      <h5 class="fs-6 fw-semibold text-secondary text-uppercase mb-3">{{ tr('First Party Details', 'بيانات الطرف الأول') }}</h5>
+    </div>
+    <div class="col-md-6"><label class="form-label">{{ tr('First Party Name', 'اسم الطرف الأول') }}</label>{{ contract_form.first_party_name(class_="form-control", **{"data-ar-target":"first_party_name_ar"}) }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('First Party Name (Arabic)', 'اسم الطرف الأول بالعربية') }}</label>{{ contract_form.first_party_name_ar(class_="form-control", **{"data-ar-source":"first_party_name"}) }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('First Party Label', 'وصف الطرف الأول') }}</label>{{ contract_form.first_party_label(class_="form-control", **{"data-ar-target":"first_party_label_ar"}) }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('First Party Label (Arabic)', 'وصف الطرف الأول بالعربية') }}</label>{{ contract_form.first_party_label_ar(class_="form-control", **{"data-ar-source":"first_party_label"}) }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Second Party Label', 'وصف الطرف الثاني') }}</label>{{ contract_form.second_party_label(class_="form-control", **{"data-ar-target":"second_party_label_ar"}) }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Second Party Label (Arabic)', 'وصف الطرف الثاني بالعربية') }}</label>{{ contract_form.second_party_label_ar(class_="form-control", **{"data-ar-source":"second_party_label"}) }}</div>
+
+    <div class="col-12 pt-2">
+      <h5 class="fs-6 fw-semibold text-secondary text-uppercase mb-3">{{ tr('Contract Body', 'محتوى العقد') }}</h5>
+    </div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Intro', 'المقدمة') }}</label>{{ contract_form.intro_content(class_="form-control", rows="4") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Intro (Arabic)', 'المقدمة (عربي)') }}</label>{{ contract_form.intro_content_ar(class_="form-control", rows="4", dir="rtl") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Terms / Core Body', 'الشروط / النص الأساسي') }}</label>{{ contract_form.body_content(class_="form-control", rows="5") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Terms / Core Body (Arabic)', 'الشروط / النص الأساسي (عربي)') }}</label>{{ contract_form.body_content_ar(class_="form-control", rows="5", dir="rtl") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Eligibility Terms', 'شروط الاستحقاق') }}</label>{{ contract_form.eligibility_content(class_="form-control", rows="4") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Eligibility Terms (Arabic)', 'شروط الاستحقاق (عربي)') }}</label>{{ contract_form.eligibility_content_ar(class_="form-control", rows="4", dir="rtl") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('General Terms', 'الشروط العامة') }}</label>{{ contract_form.general_terms_content(class_="form-control", rows="4") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('General Terms (Arabic)', 'الشروط العامة (عربي)') }}</label>{{ contract_form.general_terms_content_ar(class_="form-control", rows="4", dir="rtl") }}</div>
+
+    <div class="col-12 pt-2">
+      <h5 class="fs-6 fw-semibold text-secondary text-uppercase mb-3">{{ tr('Target and Payout Rules', 'قواعد الهدف والمقابل') }}</h5>
+    </div>
+    <div class="col-md-3"><label class="form-label">{{ tr('Target Orders', 'عدد الطلبات المستهدف') }}</label>{{ contract_form.target_orders(class_="form-control") }}</div>
+    <div class="col-md-3"><label class="form-label">{{ tr('Target Salary', 'راتب الهدف') }}</label>{{ contract_form.target_salary(class_="form-control") }}</div>
+    <div class="col-md-3"><label class="form-label">{{ tr('Bonus Per Extra Order', 'المكافأة لكل طلب إضافي') }}</label>{{ contract_form.bonus_per_extra_order(class_="form-control") }}</div>
+    <div class="col-md-3"><label class="form-label">{{ tr('Deduction Per Missing Order', 'الخصم لكل طلب ناقص') }}</label>{{ contract_form.deduction_per_missing_order(class_="form-control") }}</div>
+    <div class="col-12">
+      <label class="form-label">{{ tr('Calculation Tiers JSON', 'طبقات الحساب JSON') }}</label>
+      {{ contract_form.calculation_tiers_json(class_="form-control", rows="5", placeholder='[{"label":"Level One","min_orders":460,"max_orders":null,"calculation_mode":"bonus_per_extra_order","per_order_rate":10},{"label":"Level Two","min_orders":414,"max_orders":459,"calculation_mode":"deduction_per_missing_order","per_order_rate":22}]') }}
+      <div class="form-text">{{ tr('Use a JSON array of tier objects. The form validates the structure before saving.', 'استخدم مصفوفة JSON من الكائنات الخاصة بالطبقات. يتحقق النموذج من البنية قبل الحفظ.') }}</div>
+    </div>
+
+    <div class="col-12 pt-2">
+      <h5 class="fs-6 fw-semibold text-secondary text-uppercase mb-3">{{ tr('Signatory', 'التوقيع') }}</h5>
+    </div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Company Signatory Name', 'اسم ممثل الشركة') }}</label>{{ contract_form.company_signatory_name(class_="form-control") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Company Signatory Title', 'صفة ممثل الشركة') }}</label>{{ contract_form.company_signatory_title(class_="form-control") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Signature Notes', 'ملاحظات التوقيع') }}</label>{{ contract_form.signature_notes(class_="form-control", rows="3") }}</div>
+    <div class="col-md-6"><label class="form-label">{{ tr('Signature Notes (Arabic)', 'ملاحظات التوقيع (عربي)') }}</label>{{ contract_form.signature_notes_ar(class_="form-control", rows="3", dir="rtl") }}</div>
+
+    <div class="col-12 d-flex justify-content-between align-items-center flex-wrap gap-3 pt-3">
+      <div class="form-check">
+        {{ contract_form.is_active(class_="form-check-input") }}
+        <label class="form-check-label">{{ tr('Template is active', 'القالب نشط') }}</label>
+      </div>
+      <div class="d-flex gap-2">
+        <a class="btn btn-light" href="{{ url_for('admin.contract_templates') }}">{{ tr('Cancel', 'إلغاء') }}</a>
+        <button class="btn btn-primary" type="submit">{{ tr('Update Template', 'تحديث القالب') if editing_template else tr('Save Template', 'حفظ القالب') }}</button>
+      </div>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+  (function () {
+    const translationMap = {
+      "Speed Logi Company": "شركة سبيد لوجي",
+      "First Party": "الطرف الأول",
+      "Second Party / The Courier": "الطرف الثاني / السائق",
+      "Second Party / Driver": "الطرف الثاني / السائق",
+      "Authorized Signatory": "المفوض بالتوقيع",
+      "Operations Director": "مدير العمليات"
+    };
+
+    function mirrorEnglishToArabic(value) {
+      if (!value) {
+        return "";
+      }
+      const exact = translationMap[value.trim()];
+      if (exact) {
+        return exact;
+      }
+      return value;
+    }
+
+    document.querySelectorAll("[data-ar-target]").forEach((sourceField) => {
+      const targetName = sourceField.getAttribute("data-ar-target");
+      const targetField = document.querySelector(`[name="${targetName}"]`);
+      if (!targetField) {
+        return;
+      }
+
+      let lastAutoValue = targetField.value || "";
+
+      const sync = () => {
+        const nextValue = mirrorEnglishToArabic(sourceField.value);
+        if (targetField.value === "" || targetField.value === lastAutoValue) {
+          targetField.value = nextValue;
+        }
+        lastAutoValue = nextValue;
+      };
+
+      sourceField.addEventListener("input", sync);
+      sourceField.addEventListener("change", sync);
+      sync();
+    });
+  })();
+</script>
+{% endblock %}

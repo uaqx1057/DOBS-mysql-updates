@@ -11,7 +11,8 @@ from sqlalchemy import or_
 from extensions import db, mail, limiter
 from models import Driver, User, Offboarding, DriverDocument
 from services.file_storage import save_to_shared_storage
-from services import onboarding_workflow
+from services import onboarding_workflow, dms_payroll
+from services.rbac import require_permission, user_can_access_dashboard, user_has_permission
 from utils.email_utils import send_password_change_email, safe_send_email
 from flask_wtf.csrf import validate_csrf, CSRFError
 from forms.common import (
@@ -110,7 +111,7 @@ def offboarding_to_dict(off):
 @finance_bp.route("/dashboard")
 @login_required
 def dashboard_finance():
-    if current_user.role != "FinanceManager":
+    if not user_can_access_dashboard(current_user, "finance.dashboard_finance"):
         flash("Access denied. Finance Manager role required.", "danger")
         return redirect(url_for("auth.login"))
 
@@ -161,6 +162,14 @@ def dashboard_finance():
         )
     offboarding_requests = offboarding_requests_query.order_by(Offboarding.requested_at.desc()).all()
 
+    # Live preview of DMS's payroll balance for each pending offboarding -
+    # the stored dms_salary_balance on the record itself is only set once
+    # Finance actually clears it, so this is looked up fresh for display.
+    dms_balances = {
+        o.id: dms_payroll.latest_salary_slip(o.driver_id)[1]
+        for o in offboarding_requests
+    }
+
     total_drivers = len(pending_drivers)
     total_users = len(offboarding_requests)
 
@@ -169,11 +178,14 @@ def dashboard_finance():
         pending_drivers=pending_drivers,
         completed_drivers=completed_drivers,
         offboarding_requests=offboarding_requests,
+        dms_balances=dms_balances,
         datetime=datetime,
         total_drivers=total_drivers,
         total_users=total_users,
         user=current_user,
         q=q,
+        can_approve_onboarding=user_has_permission(current_user, "onboarding.finance.approve"),
+        can_clear_offboarding=user_has_permission(current_user, "offboarding.finance.clear"),
     )
 
 # -------------------------
@@ -182,17 +194,18 @@ def dashboard_finance():
 @finance_bp.route("/approve_driver/<int:driver_id>", methods=["POST"])
 @limiter.limit("30 per minute")
 @login_required
+@require_permission("onboarding.finance.approve")
 def approve_driver(driver_id):
-    if current_user.role != "FinanceManager":
-        flash("Access denied. Finance Manager role required.", "danger")
-        return redirect(url_for("auth.login"))
-
     form = FinanceApproveForm()
     if not form.validate_on_submit():
         flash("Invalid or missing CSRF token. Please try again.", "danger")
         return redirect(url_for("finance.dashboard_finance"))
 
     driver = Driver.query.get_or_404(driver_id)
+
+    if driver.onboarding_stage != "Finance":
+        flash(f"Driver is not in Finance stage (current: {driver.onboarding_stage}).", "warning")
+        return redirect(url_for("finance.dashboard_finance"))
 
     # Collect form data
     driver.transfer_fee_paid = bool(form.transfer_fee_paid.data)
@@ -427,11 +440,8 @@ def change_password():
 @finance_bp.route("/offboarding/clear/<int:offboarding_id>", methods=["POST"])
 @limiter.limit("30 per minute")
 @login_required
+@require_permission("offboarding.finance.clear")
 def clear_offboarding(offboarding_id):
-    if current_user.role != "FinanceManager":
-        flash("Access denied. Finance Manager role required.", "danger")
-        return redirect(url_for("finance.dashboard_finance"))
-
     form = FinanceOffboardingClearForm()
     if not form.validate_on_submit():
         flash("Invalid or missing CSRF token. Please try again.", "danger")
@@ -439,11 +449,30 @@ def clear_offboarding(offboarding_id):
 
     record = Offboarding.query.get_or_404(offboarding_id)
 
+    if record.status != "Finance":
+        flash(f"Offboarding is not in Finance stage (current: {record.status}).", "warning")
+        return redirect(url_for("finance.dashboard_finance"))
+
     try:
         record.finance_cleared = True
         record.finance_cleared_at = datetime.utcnow()
         record.finance_adjustments = float(form.finance_adjustments.data or 0)
         record.finance_note = (form.finance_note.data or "").strip()
+
+        # Pull DMS's own running payroll balance and fold it together with
+        # Ops Supervisor's penalty and Fleet's damage cost into one net
+        # settlement figure - this is what HR's final step branches on.
+        slip_id, dms_balance = dms_payroll.latest_salary_slip(record.driver_id)
+        net_amount, direction = dms_payroll.compute_settlement(
+            dms_balance,
+            record.ops_supervisor_penalty_amount,
+            record.fleet_damage_cost,
+            record.finance_adjustments,
+        )
+        record.dms_salary_slip_id = slip_id
+        record.dms_salary_balance = dms_balance
+        record.net_settlement_amount = net_amount
+        record.settlement_direction = direction
 
         # Handle invoice upload
         file = request.files.get("finance_invoice_file")

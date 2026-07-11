@@ -14,6 +14,7 @@ import os
 from flask_wtf.csrf import validate_csrf, CSRFError
 from forms.common import CSRFOnlyForm, ChangePasswordForm, FleetAssignForm, FleetOffboardingForm
 from services import onboarding_workflow
+from services.rbac import require_permission, user_can_access_dashboard, user_has_permission
 
 fleet_bp = Blueprint("fleet", __name__)
 
@@ -86,7 +87,7 @@ def _release_driver_vehicle_assignments(driver, released_at):
 @fleet_bp.route("/dashboard")
 @login_required
 def dashboard_fleet():
-    if current_user.role != "FleetManager":
+    if not user_can_access_dashboard(current_user, "fleet.dashboard_fleet"):
         flash("Access denied", "danger")
         return redirect(url_for("auth.login"))
 
@@ -169,22 +170,28 @@ def dashboard_fleet():
         total_tamm=offboarding_pending_tamm,
         available_vehicles=available_vehicles,
         q=q,
+        can_assign_vehicle=user_has_permission(current_user, "onboarding.fleet_manager.approve"),
+        can_clear_offboarding=user_has_permission(current_user, "offboarding.fleet_manager.clear"),
     )
 # -------------------------
 # Assign Vehicle & Send to Next Stage
 # -------------------------
 @fleet_bp.route("/assign_vehicle/<int:driver_id>", methods=["POST"])
 @login_required
+@require_permission("onboarding.fleet_manager.approve")
 def assign_vehicle(driver_id):
     """Fleet Manager assigns vehicle and sends driver to next stage."""
-    if current_user.role != "FleetManager":
-        return jsonify({"success": False, "message": "Access denied. Fleet Manager role required."}), 403
-
     form = FleetAssignForm()
     if not form.validate_on_submit():
         return jsonify({"success": False, "message": "Invalid CSRF token."}), 400
 
     driver = Driver.query.get_or_404(driver_id)
+
+    if driver.onboarding_stage != "Fleet Manager":
+        return jsonify({
+            "success": False,
+            "message": f"Driver is not in Fleet Manager stage (current: {driver.onboarding_stage}).",
+        }), 400
 
     # Gather form data
     vehicle_id = form.vehicle_id.data
@@ -378,14 +385,16 @@ def assign_vehicle(driver_id):
 @fleet_bp.route("/api/offboarding_action/<int:offboarding_id>", methods=["POST"])
 @limiter.limit("30 per minute")
 @login_required
+@require_permission("offboarding.fleet_manager.clear")
 def offboarding_action(offboarding_id):
-    if current_user.role != "FleetManager":
-        return jsonify({"success": False, "message": "Access denied"}), 403
-
     if not _validate_csrf():
         return jsonify({"success": False, "message": "Invalid CSRF token."}), 400
 
     record = Offboarding.query.get_or_404(offboarding_id)
+
+    if record.status != "Fleet":
+        return jsonify({"success": False, "message": f"Offboarding is not in Fleet stage (current: {record.status})."}), 400
+
     data = request.get_json(silent=True) or {}
     driver_name = record.driver.name if record.driver else "Driver"
 

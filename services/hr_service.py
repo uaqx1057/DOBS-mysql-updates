@@ -7,13 +7,14 @@ from flask_mail import Message
 
 from services.file_storage import is_allowed_file, save_upload, safe_ext_filename, validate_upload, save_to_shared_storage
 from services import onboarding_workflow
-from models import QIWA_CONTRACT_STATUSES, TRANSFER_STATUSES
+from models import QIWA_CONTRACT_STATUSES, TRANSFER_STATUSES, DriverTypeSettings
 
 # Maps Driver column names used in HR approval -> shared document_type
 _HR_FIELD_TO_DOC_TYPE = {
     "company_contract_file": "contract",
     "promissory_note_file":  "other",
     "qiwa_contract_file":    "contract",
+    "other_document_files":  "other",
 }
 
 
@@ -42,13 +43,17 @@ def process_hr_approval(driver, files: Dict[str, object], form_data: Dict[str, o
 
     shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH", upload_folder)
 
-    for db_field, file_storage in files.items():
-        if file_storage and getattr(file_storage, "filename", None):
+    for db_field in files:
+        file_list = files.getlist(db_field) if hasattr(files, "getlist") else [files[db_field]]
+        for file_storage in file_list:
+            if not file_storage or not getattr(file_storage, "filename", None):
+                continue
             original = file_storage.filename
             validate_upload(file_storage, max_bytes)
             filename = safe_ext_filename(prefix, db_field, original)
             save_upload(file_storage, upload_folder, filename)
-            setattr(driver, db_field, filename)
+            if hasattr(driver, db_field):
+                setattr(driver, db_field, filename)
 
             if db is not None and driver.id:
                 doc_type = _HR_FIELD_TO_DOC_TYPE.get(db_field, "other")
@@ -58,11 +63,23 @@ def process_hr_approval(driver, files: Dict[str, object], form_data: Dict[str, o
                 except Exception:
                     current_app.logger.exception("Shared storage dual-write failed for field %s", db_field)
 
-    driver.qiwa_contract_created = bool(form_data.get("qiwa_contract_created"))
+    # Qiwa contracts are a company-sponsorship concept - only Sponsor-type
+    # drivers can have one, per driver_type's requires_qiwa_contract flag
+    # (admin-editable, not hardcoded). Freelancer/Manpower submissions are
+    # silently forced False rather than erroring, since the UI already
+    # hides the field for those types - this is defense in depth.
+    type_settings = DriverTypeSettings.query.get(driver.driver_type_id)
+    qiwa_allowed = bool(type_settings and type_settings.requires_qiwa_contract)
+
+    driver.qiwa_contract_created = qiwa_allowed and bool(form_data.get("qiwa_contract_created"))
     driver.company_contract_created = bool(form_data.get("company_contract_created"))
 
     qiwa_status = form_data.get("qiwa_contract_status", "Pending") or "Pending"
     transfer_status = form_data.get("sponsorship_transfer_status", "Pending") or "Pending"
+    if not qiwa_allowed:
+        qiwa_status = "Pending"
+        transfer_status = "Not Required"
+
     if qiwa_status not in QIWA_CONTRACT_STATUSES:
         raise ValueError("Invalid qiwa_contract_status")
     if transfer_status not in TRANSFER_STATUSES:
