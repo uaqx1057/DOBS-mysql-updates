@@ -67,6 +67,10 @@
           <td class="d-flex gap-2 flex-wrap">
             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.preview_contract_template', template_id=tpl.id) }}" target="_blank">{{ tr('Preview', 'معاينة') }}</a>
             <a class="btn btn-sm btn-outline-info" href="{{ url_for('admin.contract_templates', edit_template_id=tpl.id) }}#template-form">{{ tr('Edit', 'تعديل') }}</a>
+            <form method="post" action="{{ url_for('admin.duplicate_contract_template', template_id=tpl.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary" type="submit">{{ tr('Duplicate', 'نسخ') }}</button>
+            </form>
             <form method="post" action="{{ url_for('admin.toggle_contract_template', template_id=tpl.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-secondary" type="submit">{{ tr('Deactivate', 'إلغاء التفعيل') if tpl.is_active else tr('Activate', 'تفعيل') }}</button>

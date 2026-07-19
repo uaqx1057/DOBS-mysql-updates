@@ -144,13 +144,13 @@
                   <label class="dobs-label" for="iqama_card_upload">{{ 'Iqama Card' if not is_ar else 'بطاقة الإقامة' }} <span class="dobs-required">*</span></label>
                   <input class="dobs-input" type="file" id="iqama_card_upload" name="iqama_card_upload" accept=".png,.jpg,.jpeg,.pdf" required>
                 </div>
-                <div class="dobs-field-group">
+                <div class="dobs-field-group" id="driving-license-field">
                   <label class="dobs-label" for="driving_license_upload">{{ 'Driving License' if not is_ar else 'رخصة القيادة' }} <span class="dobs-required">*</span></label>
                   <input class="dobs-input" type="file" id="driving_license_upload" name="driving_license_upload" accept=".png,.jpg,.jpeg,.pdf" required>
                 </div>
                 <div class="dobs-field-group">
-                  <label class="dobs-label" for="passport_upload">{{ 'Passport' if not is_ar else 'جواز السفر' }} <span class="dobs-required">*</span></label>
-                  <input class="dobs-input" type="file" id="passport_upload" name="passport_upload" accept=".png,.jpg,.jpeg,.pdf" required>
+                  <label class="dobs-label" for="passport_upload">{{ 'Passport (optional)' if not is_ar else 'جواز السفر (اختياري)' }}</label>
+                  <input class="dobs-input" type="file" id="passport_upload" name="passport_upload" accept=".png,.jpg,.jpeg,.pdf">
                 </div>
                 <div class="dobs-wizard-nav">
                   <button type="button" class="dobs-submit dobs-submit--secondary" id="wizardBackBtn">{{ 'Back' if not is_ar else 'رجوع' }}</button>
@@ -166,6 +166,20 @@
 
   <script>
     (function () {
+      var hasLicence = document.getElementById('saudi_driving_license');
+      var licenceField = document.getElementById('driving-license-field');
+      var licenceUpload = document.getElementById('driving_license_upload');
+
+      function syncLicenceUpload() {
+        var licenceRequired = hasLicence.value === 'yes';
+        licenceField.style.display = licenceRequired ? '' : 'none';
+        licenceUpload.required = licenceRequired;
+        if (!licenceRequired) licenceUpload.value = '';
+      }
+
+      hasLicence.addEventListener('change', syncLicenceUpload);
+      syncLicenceUpload();
+
       function goTo(step) {
         if (step === 2) {
           var invalid = null;

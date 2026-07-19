@@ -63,8 +63,12 @@ def _parse_date_value(value):
 
 def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[str], platform_ids: Iterable[str]):
     """Update driver fields and business assignments from submitted form data."""
-    bool_fields = {"saudi_driving_license", "mobile_issued", "tamm_authorized", "transfer_fee_paid"}
-    date_fields = {"iqaama_expiry", "assignment_date", "transfer_fee_paid_at"}
+    bool_fields = {"saudi_driving_license", "mobile_issued", "tamm_authorized", "transfer_fee_paid", "ops_manager_approved"}
+    date_fields = {
+        "iqaama_expiry", "assignment_date", "transfer_fee_paid_at",
+        "ops_manager_approved_at", "hr_approved_at", "ops_supervisor_approved_at",
+        "fleet_manager_approved_at", "finance_approved_at",
+    }
 
     for field in form_data.keys():
         if field in {"csrf_token", "business_id[]", "platform_id[]", "driver_id"}:

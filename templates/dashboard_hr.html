@@ -12,9 +12,10 @@
 <div class="stat-grid">
   <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_drivers or 0 }}">0</div><div class="stat-label">{{ tr('HR Stage', 'مرحلة الموارد البشرية') }}</div></div>
   <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_users or 0 }}">0</div><div class="stat-label">{{ tr('HR Final Stage', 'المرحلة النهائية') }}</div></div>
-  <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_completed_onboarded or 0 }}">0</div><div class="stat-label">{{ tr('Completed', 'مكتمل') }}</div></div>
+  <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_completed_onboarded or 0 }}">0</div><div class="stat-label">{{ tr('Completed Onboarded', 'مكتمل الانضمام') }}</div></div>
   <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_pending_onboarded or 0 }}">0</div><div class="stat-label">{{ tr('Offboarding: HR Stage', 'الخروج: مرحلة الموارد البشرية') }}</div></div>
-  <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_completed_offboarded or 0 }}">0</div><div class="stat-label">{{ tr('Offboarding: Completed', 'الخروج: مكتمل') }}</div></div>
+  <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_completed_offboarded or 0 }}">0</div><div class="stat-label">{{ tr('Completed Offboarded', 'مكتمل الخروج') }}</div></div>
+  <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_rejected or 0 }}">0</div><div class="stat-label">{{ tr('Rejected', 'مرفوض') }}</div></div>
 </div>
 
 <div class="search-bar"><span class="search-icon">&#128269;</span>
@@ -24,6 +25,9 @@
 <div data-tabs class="tabs-bar">
   <button class="tab-btn active" data-tab="drivers">{{ tr('Onboarding', 'الانضمام') }}</button>
   <button class="tab-btn" data-tab="offboarding">{{ tr('Offboarding', 'الخروج') }}</button>
+  <button class="tab-btn" data-tab="completed-onboarded">{{ tr('Completed Onboarded', 'مكتمل الانضمام') }}</button>
+  <button class="tab-btn" data-tab="completed-offboarded">{{ tr('Completed Offboarded', 'مكتمل الخروج') }}</button>
+  <button class="tab-btn" data-tab="rejected">{{ tr('Rejected', 'مرفوض') }}</button>
 </div>
 
 <div data-tab-panel="drivers" class="tab-panel">
@@ -43,24 +47,68 @@
 
 <div data-tab-panel="offboarding" class="tab-panel" hidden>
   <div class="driver-cards">
-    {% for o in offboarding_drivers %}
+    {% for o in offboarding_hr %}
     <div class="card reveal" style="grid-column:1/-1;" data-off='{{ o | tojson | safe }}'>
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
         <div>
           <h3 class="mb-1">{{ o.name }}</h3>
           <p class="mb-0 text-secondary">{{ tr('Iqama', 'الإقامة') }}: {{ o.iqaama_number }} &middot; {{ tr('Status', 'الحالة') }}: {{ o.status }}</p>
         </div>
-        {% if o.status == 'HR' and can_finalize_offboarding %}
+        {% if can_finalize_offboarding %}
         <button type="button" class="btn btn-primary btn-sm" data-finalize-offboarding="{{ o.offboarding_id }}">{{ tr('Finalize Offboarding', 'إنهاء الخروج') }}</button>
-        {% elif o.status == 'HR' %}
-        <span class="badge-soft neutral">{{ tr('View only', 'عرض فقط') }}</span>
         {% else %}
-        <span class="badge-soft success">{{ tr('Completed', 'مكتمل') }}</span>
+        <span class="badge-soft neutral">{{ tr('View only', 'عرض فقط') }}</span>
         {% endif %}
       </div>
     </div>
     {% else %}
     <p class="text-muted">{{ tr('No offboarding requests at HR stage.', 'لا توجد طلبات خروج في مرحلة الموارد البشرية.') }}</p>
+    {% endfor %}
+  </div>
+</div>
+
+<div data-tab-panel="completed-onboarded" class="tab-panel" hidden>
+  <div class="driver-cards">
+    {% for driver in completed_onboarded_drivers %}
+    <div class="driver-card reveal" style="cursor:default;">
+      <h3>{{ driver.name }}</h3>
+      <p>{{ tr('Iqama', 'الإقامة') }}: {{ driver.iqaama_number }}</p>
+      <p><span class="badge-soft success">{{ tr('Completed', 'مكتمل') }}</span></p>
+    </div>
+    {% else %}
+    <p class="text-muted">{{ tr('No fully onboarded drivers yet.', 'لا يوجد سائقون مكتملو الانضمام بعد.') }}</p>
+    {% endfor %}
+  </div>
+</div>
+
+<div data-tab-panel="completed-offboarded" class="tab-panel" hidden>
+  <div class="driver-cards">
+    {% for o in completed_offboarded %}
+    <div class="card reveal" style="grid-column:1/-1;">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <h3 class="mb-1">{{ o.name }}</h3>
+          <p class="mb-0 text-secondary">{{ tr('Iqama', 'الإقامة') }}: {{ o.iqaama_number }}</p>
+        </div>
+        <span class="badge-soft success">{{ tr('Completed', 'مكتمل') }}</span>
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted">{{ tr('No completed offboardings yet.', 'لا توجد طلبات خروج مكتملة بعد.') }}</p>
+    {% endfor %}
+  </div>
+</div>
+
+<div data-tab-panel="rejected" class="tab-panel" hidden>
+  <div class="driver-cards">
+    {% for driver in rejected_drivers %}
+    <div class="driver-card reveal" style="cursor:default;">
+      <h3>{{ driver.name }}</h3>
+      <p>{{ tr('Iqama', 'الإقامة') }}: {{ driver.iqaama_number }}</p>
+      <p><span class="badge-soft danger">{{ tr('Rejected', 'مرفوض') }}</span></p>
+    </div>
+    {% else %}
+    <p class="text-muted">{{ tr('No rejected drivers.', 'لا يوجد سائقون مرفوضون.') }}</p>
     {% endfor %}
   </div>
 </div>
@@ -84,6 +132,16 @@
           {% endif %}
         </div>
         <div id="generatedContractsList" class="mt-3 small text-secondary"></div>
+        {% if can_approve_onboarding %}
+        <div class="mt-3 pt-3" style="border-top:1px dashed var(--border-color);">
+          <div class="text-secondary small mb-2">{{ tr('Already have a contract prepared outside the system? Attach it here instead of generating one.', 'هل لديك عقد جاهز خارج النظام؟ أرفقه هنا بدلاً من إنشائه.') }}</div>
+          <form id="hrManualContractForm" method="POST" enctype="multipart/form-data" class="d-flex align-items-center gap-2 flex-wrap">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="file" class="form-control form-control-sm" style="max-width:260px;" name="manual_contract_file" accept=".pdf,.doc,.docx" required>
+            <button type="submit" class="btn btn-outline-primary btn-sm">{{ tr('Add Contract', 'إضافة العقد') }}</button>
+          </form>
+        </div>
+        {% endif %}
       </div>
 
       <div class="p-3" style="border:1px solid var(--border-color); border-radius:var(--radius-md);">
@@ -261,6 +319,8 @@
         document.getElementById('hrApproveTitle').textContent = ({{ tr('HR Review', 'مراجعة الموارد البشرية') | tojson }}) + ' — ' + d.name;
         var generateForm = document.getElementById('hrGenerateContractsForm');
         if (generateForm) generateForm.action = '/dashboard/hr/generate_contract_pack/' + d.id;
+        var manualContractForm = document.getElementById('hrManualContractForm');
+        if (manualContractForm) manualContractForm.action = '/dashboard/hr/add_contract_manual/' + d.id;
         document.getElementById('hrApproveForm').action = '/dashboard/hr/approve_driver/' + d.id;
         renderGeneratedContracts(d);
         DobsUI.openModal('hrApproveModal');

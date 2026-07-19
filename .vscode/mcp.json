@@ -20,6 +20,11 @@
         "--graph",
         "C:\\Users\\Usman\\Documents\\GitHub\\DOBS-mysql-updates\\graphify-out\\graph.json"
       ]
+    },
+    "grafel-strict": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/graphify-out/grafel-mcp.cmd",
+      "args": []
     }
   }
 }

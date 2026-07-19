@@ -18,6 +18,10 @@
         "--graph",
         "C:\\Users\\Usman\\Documents\\GitHub\\DOBS-mysql-updates\\graphify-out\\graph.json"
       ]
+    },
+    "grafel-strict": {
+      "command": "C:\\Users\\Usman\\Documents\\GitHub\\DOBS-mysql-updates\\graphify-out\\grafel-mcp.cmd",
+      "args": []
     }
   }
 }

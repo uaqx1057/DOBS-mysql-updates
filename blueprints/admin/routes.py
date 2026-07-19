@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 from flask_login import login_required, current_user, login_user
 from models import (
     Business, DriverBusinessIDS, Offboarding, db, Driver, User, BusinessID, BusinessDriver,
-    DriverType, OnboardingStageTemplate, DriverTypeSettings, ContractTemplate, CompanyPreset, Branch,
+    DriverType, OnboardingStageTemplate, DriverTypeSettings, ContractTemplate, CompanyPreset, Branch, DriverDocument, ONBOARDING_STAGES,
 )
 from extensions import db, mail, limiter
 from flask_mail import Message
@@ -12,6 +12,7 @@ import os
 from utils.email_utils import send_password_change_email
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
+from services.file_storage import save_upload, validate_upload
 from services.admin_service import (
     update_driver_from_form,
     delete_driver_and_offboarding,
@@ -43,6 +44,34 @@ from blueprints.auth.routes import _post_login_redirect
 from . import admin_bp
 
 UPLOAD_FOLDER = "static/uploads"
+
+DRIVER_DOCUMENT_UPLOADS = {
+    "iqama_card_upload": ("Iqama Card", "iqama"),
+    "driving_license_upload": ("Driving License", "license"),
+    "passport_upload": ("Passport", "passport"),
+    "company_contract_file": ("Company Contract", "contract"),
+    "promissory_note_file": ("Promissory Note", "contract"),
+    "qiwa_contract_file": ("Qiwa Contract", "contract"),
+    "transfer_fee_receipt": ("Transfer Fee Receipt", "other"),
+    "sponsorship_transfer_proof": ("Sponsorship Transfer Proof", "other"),
+    "tamm_authorization_ss": ("TAMM Authorization", "other"),
+}
+
+
+def _store_dashboard_document_uploads(driver):
+    """Persist dashboard uploads without clearing existing documents on edit."""
+    max_bytes = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
+    upload_dir = current_app.config.get("UPLOAD_FOLDER", UPLOAD_FOLDER)
+
+    for field, (label, document_type) in DRIVER_DOCUMENT_UPLOADS.items():
+        upload = request.files.get(field)
+        if not upload or not upload.filename:
+            continue
+
+        validate_upload(upload, max_bytes)
+        filename = f"{driver.id}_{field}_{datetime.utcnow():%Y%m%d%H%M%S}_{secure_filename(upload.filename)}"
+        setattr(driver, field, save_upload(upload, upload_dir, filename))
+
 
 
 @ttl_cache(ttl_seconds=120, maxsize=1)
@@ -319,31 +348,17 @@ def dashboard():
         return redirect(url_for("auth.login"))
 
     # -------------------------
-    # Users
-    # -------------------------
-    users = User.query.filter(User.id != current_user.id).all()
-    users_dicts = [
-        {
-            "id": u.id,
-            "username": u.username,
-            "name": u.name,
-            "designation": u.designation,
-            "branch_city": u.branch_city,
-            "email": u.email,
-            "role": u.role,
-        }
-        for u in users
-    ]
-
-    # -------------------------
     # Drivers and Offboarding
     # -------------------------
+    total_users = User.query.filter(User.id != current_user.id).count()
     page, per_page = _pagination_params()
     search_q = (request.args.get("q") or "").strip()
 
     # Paginate pending onboarding drivers only, so pages refill correctly
     # after a driver moves to Completed and leaves the pending pool.
-    filtered_drivers_query = Driver.query.filter(Driver.onboarding_stage != "Completed")
+    # Rejected drivers get their own tab/query below rather than showing up
+    # here mixed in with drivers still actively moving through the pipeline.
+    filtered_drivers_query = Driver.query.filter(Driver.onboarding_stage.notin_(["Completed", "Rejected"]))
     if search_q:
         pattern = f"%{search_q}%"
         filtered_drivers_query = filtered_drivers_query.filter(
@@ -361,7 +376,8 @@ def dashboard():
     drivers_query = filtered_drivers_query.order_by(Driver.id.desc())
     drivers_total = Driver.query.count()
     drivers_completed_total = Driver.query.filter(Driver.onboarding_stage == "Completed").count()
-    drivers_pending_total = max(0, drivers_total - drivers_completed_total)
+    drivers_rejected_total = Driver.query.filter(Driver.onboarding_stage == "Rejected").count()
+    drivers_pending_total = max(0, drivers_total - drivers_completed_total - drivers_rejected_total)
     drivers = drivers_query.offset((page - 1) * per_page).limit(per_page).all()
 
     status_pairs = Offboarding.query.with_entities(Offboarding.driver_id, Offboarding.status).all()
@@ -397,6 +413,10 @@ def dashboard():
             "previous_sponsor_number": d.previous_sponsor_number,
             "iqama_card_upload": d.iqama_card_upload,
             "iqama_card_upload_url": url_for("static", filename=f"uploads/{d.iqama_card_upload}") if d.iqama_card_upload else "",
+            "driving_license_upload": d.driving_license_upload,
+            "driving_license_upload_url": url_for("static", filename=f"uploads/{d.driving_license_upload}") if d.driving_license_upload else "",
+            "passport_upload": d.passport_upload,
+            "passport_upload_url": url_for("static", filename=f"uploads/{d.passport_upload}") if d.passport_upload else "",
             "saudi_driving_license": bool(d.saudi_driving_license),
             "city": d.city,
             "car_details": d.car_details,
@@ -407,6 +427,7 @@ def dashboard():
             "qiwa_contract_created": bool(d.qiwa_contract_created),
             "company_contract_created": bool(d.company_contract_created),
             "qiwa_contract_status": d.qiwa_contract_status,
+            "ops_manager_approved": bool(d.ops_manager_approved),
             "ops_manager_approved_at": d.ops_manager_approved_at.isoformat() if d.ops_manager_approved_at else None,
             "ops_supervisor_approved_at": d.ops_supervisor_approved_at.isoformat() if d.ops_supervisor_approved_at else None,
             "fleet_manager_approved_at": d.fleet_manager_approved_at.isoformat() if d.fleet_manager_approved_at else None,
@@ -421,6 +442,9 @@ def dashboard():
             "tamm_authorized": bool(d.tamm_authorized),
             "sponsorship_transfer_status": d.sponsorship_transfer_status,
             "onboarding_stage": normalized_stage,
+            "rejected_by_stage": d.rejected_by_stage,
+            "rejected_at": d.rejected_at.isoformat() if d.rejected_at else None,
+            "reject_reason": d.reject_reason,
             "company_contract_file": d.company_contract_file,
             "promissory_note_file": d.promissory_note_file,
             "qiwa_contract_file": d.qiwa_contract_file,
@@ -436,6 +460,13 @@ def dashboard():
             "offboard_requested_by":d.offboard_requested_by if offboarding_record else None,
             "offboard_reason": d.offboard_reason if offboarding_record else None,
             "offboard_requested_at": safe_datetime(offboarding_record.requested_at) if offboarding_record else None,
+            "documents": [
+                {
+                    "label": doc.notes or doc.document_type.replace("_", " ").title(),
+                    "url": url_for("driver.preview_document", doc_id=doc.id),
+                }
+                for doc in d.documents.filter(DriverDocument.deleted_at.is_(None)).order_by(DriverDocument.created_at.desc()).all()
+            ],
         }
 
         # Include offboarding record(s) as a list
@@ -494,6 +525,13 @@ def dashboard():
         if d.id not in in_offboarding_ids
     ]
 
+    rejected_drivers_records = (
+        Driver.query.filter(Driver.onboarding_stage == "Rejected")
+        .order_by(Driver.rejected_at.desc(), Driver.id.desc())
+        .all()
+    )
+    rejected_drivers_only = [serialize_driver(d) for d in rejected_drivers_records]
+
     # -------------------------
     # Businesses and available IDs
     # -------------------------
@@ -522,18 +560,30 @@ def dashboard():
     # -------------------------
     # Render template
     # -------------------------
+    dashboard_branches = Branch.query.filter(Branch.deleted_at.is_(None)).order_by(Branch.name).all()
+    onboarding_filter_stages = tuple(
+        stage for stage in ONBOARDING_STAGES if stage not in {"Completed", "Rejected"}
+    )
+    offboarding_filter_stages = (
+        ("OpsSupervisor", "Ops Supervisor"),
+        ("Fleet", "Fleet"),
+        ("Finance", "Finance"),
+        ("HR", "HR"),
+    )
+
     return render_template(
         "dashboard.html",
-        users=users_dicts,
         drivers=driver_dicts,
         fully_onboarded_drivers=fully_onboarded_only,
+        rejected_drivers=rejected_drivers_only,
         pending_offboarding_drivers=pending_offboarding_driver_dicts,
         completed_offboarding_drivers=completed_offboarding_driver_dicts,
-        total_users=len(users),
+        total_users=total_users,
         total_drivers=drivers_total,
         paged_total_drivers=paged_total_drivers,
         total_pending_onboarded=drivers_pending_total,
         total_completed_onboarded=drivers_completed_total,
+        total_rejected=drivers_rejected_total,
         total_pending_offboarded=pending_total,
         total_completed_offboarded=completed_total,
         page=page,
@@ -541,13 +591,49 @@ def dashboard():
         per_page=per_page,
         q=search_q,
         all_businesses=all_businesses,
-        branches=Branch.query.filter(Branch.deleted_at.is_(None)).order_by(Branch.name).all(),
+        branches=dashboard_branches,
+        branches_json=[{"id": b.id, "name": b.name} for b in dashboard_branches],
+        onboarding_stages=ONBOARDING_STAGES,
+        onboarding_filter_stages=onboarding_filter_stages,
+        offboarding_filter_stages=offboarding_filter_stages,
+    )
+
+
+# -------------------------
+# Users (standalone page)
+# -------------------------
+@admin_bp.route("/users", methods=["GET"])
+@login_required
+def users():
+    if current_user.role != "SuperAdmin":
+        flash("Access denied. SuperAdmin role required.", "danger")
+        return redirect(url_for("auth.login"))
+
+    all_users = User.query.filter(User.id != current_user.id).all()
+    users_dicts = [
+        {
+            "id": u.id,
+            "username": u.username,
+            "name": u.name,
+            "designation": u.designation,
+            "branch_city": u.branch_city,
+            "email": u.email,
+            "role": u.role,
+        }
+        for u in all_users
+    ]
+
+    return render_template(
+        "admin_users.html",
+        users=users_dicts,
+        total_users=len(users_dicts),
         all_roles=Role.query.order_by(Role.name).all(),
         can_impersonate=user_has_permission(current_user, "users.impersonate"),
     )
 
+
 # -------------------------
-# Get Driver JSON       
+# Get Driver JSON
 # -------------------------
 @admin_bp.route("/driver/<int:driver_id>/json")
 @login_required
@@ -669,10 +755,9 @@ def add_driver():
     business_ids = request.form.getlist("business_id[]")
     platform_ids = request.form.getlist("platform_id[]")
     try:
-        if platform_ids:
-            update_driver_from_form(driver, request.form, business_ids, platform_ids)
-        else:
-            db.session.commit()
+        update_driver_from_form(driver, request.form, business_ids, platform_ids)
+        _store_dashboard_document_uploads(driver)
+        db.session.commit()
         flash(f"✅ Driver {driver.name} created successfully.", "success")
     except Exception as e:
         db.session.rollback()
@@ -701,6 +786,8 @@ def update_driver(driver_id):
         business_ids = request.form.getlist("business_id[]")
         platform_ids = request.form.getlist("platform_id[]")
         update_driver_from_form(driver, request.form, business_ids, platform_ids)
+        _store_dashboard_document_uploads(driver)
+        db.session.commit()
         flash(f"✅ Driver {driver.name} updated successfully.", "success")
         return redirect(url_for("admin.dashboard"))
     except Exception as e:
@@ -708,6 +795,51 @@ def update_driver(driver_id):
         current_app.logger.exception("Error updating driver")
         flash(f"❌ Error updating driver: {str(e)}", "danger")
         return redirect(url_for("admin.dashboard"))
+
+
+# -------------------------
+# Reactivate Rejected Driver
+# -------------------------
+@admin_bp.route("/driver/<int:driver_id>/reactivate", methods=["POST"])
+@login_required
+def reactivate_driver(driver_id):
+    if current_user.role != "SuperAdmin":
+        flash("Access Denied", "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    driver = Driver.query.get_or_404(driver_id)
+    if driver.onboarding_stage != "Rejected":
+        flash(f"{driver.name} is not currently rejected.", "warning")
+        return redirect(url_for("admin.dashboard"))
+
+    # Full restart through the pipeline, same as a brand-new driver - clear
+    # every stage-approval timestamp so later stages can't be skipped based
+    # on leftover state from the rejected run.
+    driver.onboarding_stage = "Ops Manager"
+    driver.rejected_by_stage = None
+    driver.rejected_at = None
+    driver.reject_reason = None
+    driver.ops_manager_approved = False
+    driver.ops_manager_approved_at = None
+    driver.ops_supervisor_approved_at = None
+    driver.fleet_manager_approved_at = None
+    driver.finance_approved_at = None
+    driver.hr_approved_at = None
+
+    try:
+        db.session.commit()
+        flash(f"{driver.name} has been reactivated and sent back to Ops Manager.", "success")
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.exception("Failed to reactivate driver id=%s", driver_id)
+        flash(f"Failed to reactivate driver: {e}", "danger")
+
+    return redirect(url_for("admin.dashboard"))
 
 
 # -------------------------
@@ -753,7 +885,7 @@ def add_user():
     form.role.choices = [(r.name, r.name) for r in Role.query.order_by(Role.name).all()]
     if not form.validate_on_submit():
         flash("Please correct the user form.", "danger")
-        return redirect(url_for("admin.dashboard"))
+        return redirect(url_for("admin.users"))
 
     username = form.username.data
     raw_password = form.password.data
@@ -776,7 +908,7 @@ def add_user():
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to create user: {e}", "danger")
-        return redirect(url_for("admin.dashboard"))
+        return redirect(url_for("admin.users"))
 
     # Send email notification
     sender = current_app.config.get("MAIL_DEFAULT_SENDER")
@@ -855,7 +987,7 @@ def add_user():
             email,
         )
         flash("User created successfully and welcome email was accepted by the mail server.", "success")
-    return redirect(url_for("admin.dashboard"))
+    return redirect(url_for("admin.users"))
 
 # -------------------------
 # Edit User
@@ -868,7 +1000,7 @@ def edit_user(user_id):
     form.role.choices = [(r.name, r.name) for r in Role.query.order_by(Role.name).all()]
     if not form.validate_on_submit():
         flash("Invalid or incomplete user data.", "danger")
-        return redirect(url_for("admin.dashboard"))
+        return redirect(url_for("admin.users"))
 
     user = User.query.get_or_404(user_id)
     try:
@@ -894,7 +1026,7 @@ def edit_user(user_id):
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to update user: {e}", "danger")
-    return redirect(url_for("admin.dashboard"))
+    return redirect(url_for("admin.users"))
 
 # -------------------------
 # Delete User
@@ -904,12 +1036,12 @@ def edit_user(user_id):
 def delete_user(user_id):
     if current_user.role != "SuperAdmin":
         flash("Access Denied", "danger")
-        return redirect(url_for("admin.dashboard"))
+        return redirect(url_for("admin.users"))
 
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
         flash("Invalid request.", "danger")
-        return redirect(url_for("admin.dashboard"))
+        return redirect(url_for("admin.users"))
 
     user = User.query.get_or_404(user_id)
     try:
@@ -918,7 +1050,7 @@ def delete_user(user_id):
     except Exception as e:
         db.session.rollback()
         flash(f"Failed to delete user: {e}", "danger")
-    return redirect(url_for("admin.dashboard"))
+    return redirect(url_for("admin.users"))
 
 # -------------------------
 # Change Password (for SuperAdmin)
@@ -1168,6 +1300,38 @@ def preview_contract_template(template_id):
         as_attachment=False,
         download_name=f"{template.name.replace(' ', '_')}_preview.pdf",
     )
+
+
+@admin_bp.route("/workflow-config/contract-template/<int:template_id>/duplicate", methods=["POST"])
+@login_required
+def duplicate_contract_template(template_id):
+    if current_user.role != "SuperAdmin":
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.contract_templates"))
+
+    source = ContractTemplate.query.get_or_404(template_id)
+
+    skip_columns = {"id", "created_at", "updated_at"}
+    copy_data = {
+        column.name: getattr(source, column.name)
+        for column in ContractTemplate.__table__.columns
+        if column.name not in skip_columns
+    }
+    copy_data["name"] = f"{source.name} (Copy)"
+    # Duplicates always start inactive so they can't be picked up by
+    # _resolve_template() and start generating contracts before someone has
+    # reviewed/edited the copy.
+    copy_data["is_active"] = False
+
+    duplicate = ContractTemplate(**copy_data)
+    db.session.add(duplicate)
+    db.session.commit()
+    flash(f"Duplicated '{source.name}' as '{duplicate.name}' (inactive).", "success")
+    return redirect(url_for("admin.contract_templates", edit_template_id=duplicate.id))
 
 
 @admin_bp.route("/workflow-config/contract-template/<int:template_id>/toggle-active", methods=["POST"])
@@ -1458,7 +1622,7 @@ def impersonate_user(user_id):
     form = CSRFOnlyForm()
     if not form.validate_on_submit():
         flash("Invalid request.", "danger")
-        return redirect(url_for("admin.dashboard"))
+        return redirect(url_for("admin.users"))
 
     target = User.query.get_or_404(user_id)
     admin_username = current_user.username
@@ -1466,7 +1630,7 @@ def impersonate_user(user_id):
         impersonation.start(current_user, target, session, ip_address=request.remote_addr)
     except ImpersonationError as e:
         flash(str(e), "danger")
-        return redirect(url_for("admin.dashboard"))
+        return redirect(url_for("admin.users"))
 
     login_user(target)
     current_app.logger.info(

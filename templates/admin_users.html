@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tr('Users', 'المستخدمون') }} — DOBS{% endblock %}
+{% block navbar_title %}{{ tr('Users', 'المستخدمون') }}{% endblock %}
+{% block navbar_actions %}
+<a href="{{ url_for('admin.dashboard') }}" class="nav-btn">&larr; {{ tr('Back to Dashboard', 'العودة للوحة التحكم') }}</a>
+{% endblock %}
+
+{% block content %}
+<div class="page-header reveal d-flex justify-content-between align-items-start flex-wrap gap-3">
+  <div>
+    <h1 class="page-title">{{ tr('Users', 'المستخدمون') }}</h1>
+    <p class="page-subtitle">{{ tr('Manage admin users and their access.', 'إدارة مستخدمي النظام وصلاحياتهم.') }}</p>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-primary" data-modal-open="userModal" onclick="DobsUI._resetUserForm && DobsUI._resetUserForm()">+ {{ tr('Add User', 'إضافة مستخدم') }}</button>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_users or 0 }}">0</div><div class="stat-label">{{ tr('Total Users', 'إجمالي المستخدمين') }}</div></div>
+</div>
+
+<div class="search-bar"><span class="search-icon">&#128269;</span>
+  <input type="text" class="form-control" data-filter-cards="#usersList .card" placeholder="{{ tr('Search users...', 'بحث عن مستخدمين...') }}">
+</div>
+<div id="usersList" class="d-flex flex-column gap-2">
+  {% for user in users %}
+  <div class="card reveal d-flex flex-row justify-content-between align-items-center" data-search="{{ user.get('name') }} {{ user.get('username') }} {{ user.get('role') }}">
+    <div>
+      <strong>{{ user.get('name') or user.get('username') }}</strong>
+      <span class="badge-soft info ms-2">{{ user.get('role') }}</span>
+      <div class="text-secondary small">{{ user.get('email') or '' }} &middot; {{ user.get('designation') or '' }}</div>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-edit-user='{{ user | tojson }}'>{{ tr('Edit', 'تعديل') }}</button>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.user_access', user_id=user.get('id')) }}">{{ tr('Access', 'الصلاحيات') }}</a>
+      {% if can_impersonate and user.get('id') != current_user.id %}
+      <form method="POST" action="{{ url_for('admin.impersonate_user', user_id=user.get('id')) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-sm btn-outline-warning">{{ tr('Impersonate', 'انتحال الهوية') }}</button>
+      </form>
+      {% endif %}
+      <form method="POST" action="{{ url_for('admin.delete_user', user_id=user.get('id')) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('{{ tr('Delete this user?', 'حذف هذا المستخدم؟') }}')">{{ tr('Delete', 'حذف') }}</button>
+      </form>
+    </div>
+  </div>
+  {% else %}
+  <p class="text-muted">{{ tr('No users found.', 'لا يوجد مستخدمون.') }}</p>
+  {% endfor %}
+</div>
+
+<!-- ===================== Add/Edit user modal ===================== -->
+<div class="modal" id="userModal">
+  <div class="modal-content" style="max-width:520px;">
+    <div class="modal-header"><h3 id="userModalTitle">{{ tr('Add User', 'إضافة مستخدم') }}</h3><button class="modal-close" data-modal-close>&times;</button></div>
+    <form id="userForm" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-body">
+        <label class="form-label">{{ tr('Username', 'اسم المستخدم') }}</label><input class="form-control mb-3" name="username" required>
+        <div id="userPasswordField"><label class="form-label">{{ tr('Password', 'كلمة المرور') }}</label><input type="password" class="form-control mb-3" name="password"></div>
+        <label class="form-label">{{ tr('Role', 'الدور') }}</label>
+        <select class="form-select mb-3" name="role" required>
+          {% for r in all_roles %}<option value="{{ r.name }}">{{ r.name }}</option>{% endfor %}
+        </select>
+        <label class="form-label">{{ tr('Name', 'الاسم') }}</label><input class="form-control mb-3" name="name">
+        <label class="form-label">{{ tr('Designation', 'المسمى الوظيفي') }}</label><input class="form-control mb-3" name="designation">
+        <label class="form-label">{{ tr('Branch City', 'مدينة الفرع') }}</label><input class="form-control mb-3" name="branch_city">
+        <label class="form-label">{{ tr('Email', 'البريد الإلكتروني') }}</label><input type="email" class="form-control" name="email">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
+        <button type="submit" class="btn btn-primary">{{ tr('Save', 'حفظ') }}</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+(function () {
+  DobsUI._resetUserForm = function () {
+    var form = document.getElementById('userForm');
+    form.reset();
+    form.action = "{{ url_for('admin.add_user') }}";
+    document.getElementById('userModalTitle').textContent = {{ tr('Add User', 'إضافة مستخدم') | tojson }};
+    document.getElementById('userPasswordField').style.display = '';
+    form.elements['password'].required = true;
+  };
+
+  document.querySelectorAll('[data-edit-user]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var u = JSON.parse(btn.getAttribute('data-edit-user') || '{}');
+      var form = document.getElementById('userForm');
+      form.reset();
+      ['username', 'role', 'name', 'designation', 'branch_city', 'email'].forEach(function (key) {
+        if (form.elements[key]) form.elements[key].value = u[key] || '';
+      });
+      form.action = '/dashboard/edit_user/' + u.id;
+      document.getElementById('userModalTitle').textContent = {{ tr('Edit User', 'تعديل مستخدم') | tojson }};
+      document.getElementById('userPasswordField').style.display = 'none';
+      form.elements['password'].required = false;
+      DobsUI.openModal('userModal');
+    });
+  });
+})();
+</script>
+{% endblock %}

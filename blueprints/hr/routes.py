@@ -1,10 +1,11 @@
 # blueprints/hr/routes.py
-from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, current_app
+from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, current_app, send_from_directory, abort
 from flask_login import login_required, current_user
 from models import Driver, User, Offboarding, DriverTypeSettings, DriverDocument, SharedGeneratedDriverContract
 from extensions import db, mail, csrf
 from services.hr_service import process_hr_approval, save_transfer_proof, send_rejection_email
 from services.rbac import require_permission, user_can_access_dashboard, user_has_permission
+from services.file_storage import save_to_shared_storage
 from flask_mail import Message
 from datetime import datetime
 import os
@@ -40,6 +41,29 @@ def _static_upload_url(relative_path: str | None) -> str:
     return url_for("static", filename=f"uploads/{relative_path}")
 
 
+def _shared_document_url(relative_path: str | None) -> str:
+    """Auto-generated/manually-added contracts and promissory notes live in
+    DRIVER_DOCUMENT_PATH (shared storage), not static/uploads - unlike the
+    HR-approval-upload fields (company_contract_file etc.), which are
+    dual-written to static/uploads and use _static_upload_url() above."""
+    if not relative_path:
+        return ""
+    return url_for("hr.serve_shared_document", relative_path=relative_path)
+
+
+@hr_bp.route("/shared-document/<path:relative_path>")
+@login_required
+def serve_shared_document(relative_path):
+    shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH") or current_app.config.get("UPLOAD_FOLDER")
+    full_path = os.path.realpath(os.path.join(shared_root, relative_path))
+    if not full_path.startswith(os.path.realpath(shared_root) + os.sep):
+        abort(404)
+    directory, filename = os.path.split(full_path)
+    if not os.path.isfile(full_path):
+        abort(404)
+    return send_from_directory(directory, filename)
+
+
 def _generated_contract_links(driver: Driver) -> list[dict]:
     rows = (
         SharedGeneratedDriverContract.query
@@ -52,7 +76,7 @@ def _generated_contract_links(driver: Driver) -> list[dict]:
             "id": row.id,
             "reference_number": row.reference_number,
             "name": row.original_name or row.reference_number,
-            "url": _static_upload_url(row.file_path),
+            "url": _shared_document_url(row.file_path),
             "business": row.business.name if row.business else "Generic",
             "generated_at": row.generated_at.isoformat() if row.generated_at else None,
         }
@@ -72,7 +96,7 @@ def _generated_promissory_link(driver: Driver) -> dict | None:
     return {
         "id": note.id,
         "name": note.original_name or note.notes or "Promissory Note",
-        "url": _static_upload_url(note.file_path),
+        "url": _shared_document_url(note.file_path),
         "generated_at": note.created_at.isoformat() if note.created_at else None,
     }
 
@@ -214,63 +238,84 @@ def dashboard_hr():
 
     q = (request.args.get("q") or "").strip()
 
-    all_drivers_query = Driver.query.filter(
-        Driver.onboarding_stage.in_(["HR", "HR Final", "Completed"])
-    )
-    if q:
+    def _driver_search(query):
+        if not q:
+            return query
         pattern = f"%{q}%"
-        all_drivers_query = all_drivers_query.filter(
+        return query.filter(
             sa.or_(
                 Driver.name.ilike(pattern),
                 Driver.iqaama_number.ilike(pattern),
                 Driver.driver_id.ilike(pattern),
             )
         )
-    all_drivers = all_drivers_query.all()
+
+    def _offboarding_search(query):
+        if not q:
+            return query
+        pattern = f"%{q}%"
+        return query.join(Offboarding.driver).filter(
+            sa.or_(
+                Driver.name.ilike(pattern),
+                Driver.iqaama_number.ilike(pattern),
+                Driver.driver_id.ilike(pattern),
+            )
+        )
 
     offboarding_driver_ids = {o.driver_id for o in Offboarding.query.all()}
 
-    hr_stage_drivers = Driver.query.filter_by(onboarding_stage="HR").all()
-    total_drivers = len([d for d in hr_stage_drivers if d.id not in offboarding_driver_ids])
+    # Onboarding tab: drivers actively at the HR or HR Final stage.
+    onboarding_drivers = _driver_search(
+        Driver.query.filter(Driver.onboarding_stage.in_(["HR", "HR Final"]))
+    ).order_by(Driver.name.asc()).all()
+    total_drivers = len([d for d in onboarding_drivers if d.onboarding_stage == "HR"])
+    total_users = len([d for d in onboarding_drivers if d.onboarding_stage == "HR Final"])
 
-    hr_final_drivers = Driver.query.filter_by(onboarding_stage="HR Final").all()
-    total_users = len([d for d in hr_final_drivers if d.id not in offboarding_driver_ids])
+    # Completed Onboarded tab: onboarding finished and never entered offboarding at all
+    # (once offboarding starts - even mid-process - the driver belongs under the
+    # offboarding tabs instead, not here).
+    completed_onboarded_drivers = [
+        d for d in _driver_search(Driver.query.filter(Driver.onboarding_stage == "Completed"))
+            .order_by(Driver.name.asc()).all()
+        if d.id not in offboarding_driver_ids
+    ]
+    total_completed_onboarded = len(completed_onboarded_drivers)
 
-    completed_onboarded = Driver.query.filter_by(onboarding_stage="Completed").all()
-    total_completed_onboarded = len([d for d in completed_onboarded if d.id not in offboarding_driver_ids])
+    # Rejected tab: drivers rejected during onboarding (Ops Manager or HR first pass).
+    rejected_drivers = _driver_search(
+        Driver.query.filter(Driver.onboarding_stage == "Rejected")
+    ).order_by(Driver.name.asc()).all()
+    total_rejected = len(rejected_drivers)
 
-    offboarding_hr = Offboarding.query.filter(Offboarding.status == "HR").all()
+    # Offboarding tab: offboarding requests that have reached HR (not yet finalized).
+    offboarding_hr = _offboarding_search(
+        Offboarding.query.filter(Offboarding.status == "HR")
+    ).all()
     total_pending_onboarded = len(offboarding_hr)
 
-    completed_offboarded = Offboarding.query.filter(Offboarding.status == "Completed").all()
+    # Completed Offboarded tab: offboarding fully finalized by HR.
+    completed_offboarded = _offboarding_search(
+        Offboarding.query.filter(Offboarding.status == "Completed")
+    ).all()
     total_completed_offboarded = len(completed_offboarded)
 
-    drivers_data = [_serialize_driver(d) for d in all_drivers if d.id not in offboarding_driver_ids]
     qiwa_driver_type_ids = [
         row.driver_type_id for row in DriverTypeSettings.query.filter_by(requires_qiwa_contract=True).all()
     ]
-    offboardings_query = Offboarding.query.filter(Offboarding.status.in_(["HR", "Completed"]))
-    if q:
-        pattern = f"%{q}%"
-        offboardings_query = offboardings_query.join(Offboarding.driver).filter(
-            sa.or_(
-                Driver.name.ilike(pattern),
-                Driver.iqaama_number.ilike(pattern),
-                Driver.driver_id.ilike(pattern),
-            )
-        )
-    offboardings = offboardings_query.all()
-    offboarding_data = [_serialize_offboarding(o) for o in offboardings]
 
     return render_template(
         "dashboard_hr.html",
-        drivers=drivers_data,
-        offboarding_drivers=offboarding_data,
+        drivers=[_serialize_driver(d) for d in onboarding_drivers],
+        completed_onboarded_drivers=completed_onboarded_drivers,
+        rejected_drivers=rejected_drivers,
+        offboarding_hr=[_serialize_offboarding(o) for o in offboarding_hr],
+        completed_offboarded=[_serialize_offboarding(o) for o in completed_offboarded],
         total_drivers=total_drivers,
         total_users=total_users,
         total_completed_onboarded=total_completed_onboarded,
         total_pending_onboarded=total_pending_onboarded,
         total_completed_offboarded=total_completed_offboarded,
+        total_rejected=total_rejected,
         q=q,
         can_approve_onboarding=user_has_permission(current_user, "onboarding.hr.approve"),
         can_complete_transfer=user_has_permission(current_user, "onboarding.hr_final.complete"),
@@ -306,6 +351,88 @@ def generate_contract_pack(driver_id):
         db.session.rollback()
         current_app.logger.exception("HR contract pack generation failed for driver_id=%s", driver.id)
         flash(f"Error generating contract pack: {exc}", "danger")
+
+    return redirect(url_for("hr.dashboard_hr"))
+
+
+MANUAL_CONTRACT_ALLOWED_EXT = {'.pdf', '.doc', '.docx'}
+
+
+@hr_bp.route("/add_contract_manual/<int:driver_id>", methods=["POST"])
+@login_required
+@require_permission("onboarding.hr.approve")
+def add_contract_manual(driver_id):
+    """Let HR attach a contract file they already have (e.g. prepared
+    outside the system while the auto-generated pack has a rendering issue)
+    without going through generate_contract_pack / services.contracts. This
+    still satisfies the "a contract link exists" check in approve_driver."""
+    driver = Driver.query.get_or_404(driver_id)
+
+    if driver.onboarding_stage != "HR":
+        flash(f"Driver is not in HR stage (current: {driver.onboarding_stage}).", "warning")
+        return redirect(url_for("hr.dashboard_hr"))
+
+    uploaded_file = request.files.get("manual_contract_file")
+    if not uploaded_file or not uploaded_file.filename:
+        flash("Please choose a contract file to upload.", "danger")
+        return redirect(url_for("hr.dashboard_hr"))
+
+    _, ext = os.path.splitext(uploaded_file.filename.lower())
+    if ext not in MANUAL_CONTRACT_ALLOWED_EXT:
+        flash("Invalid file type. Only PDF, DOC, or DOCX are allowed.", "danger")
+        return redirect(url_for("hr.dashboard_hr"))
+
+    max_bytes = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
+    uploaded_file.stream.seek(0, os.SEEK_END)
+    size = uploaded_file.stream.tell()
+    uploaded_file.stream.seek(0)
+    if size > max_bytes:
+        flash(f"File too large. Maximum {max_bytes // (1024 * 1024)} MB.", "danger")
+        return redirect(url_for("hr.dashboard_hr"))
+
+    try:
+        from services import contracts as contracts_service
+
+        shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH") or current_app.config.get("UPLOAD_FOLDER")
+        filename = secure_filename(uploaded_file.filename)
+        relative_path = save_to_shared_storage(uploaded_file, driver.id, "contract", shared_root, filename=filename)
+
+        doc = DriverDocument(
+            driver_id=driver.id,
+            document_type="contract",
+            file_path=relative_path,
+            original_name=filename,
+            file_size=size,
+            uploaded_from="dobs",
+            uploaded_by=current_user.id,
+            notes="Manually added contract",
+        )
+        db.session.add(doc)
+        db.session.flush()
+
+        record = SharedGeneratedDriverContract(
+            reference_number=contracts_service._next_reference_number(),
+            driver_id=driver.id,
+            template_id=None,
+            driver_document_id=doc.id,
+            business_id=None,
+            generated_by=current_user.id,
+            driver_type_id=driver.driver_type_id,
+            generated_from_system="dobs_manual",
+            generated_at=datetime.utcnow(),
+            file_path=relative_path,
+            original_name=filename,
+            storage_disk="shared_driver_documents",
+            signed_status="pending",
+            notes="Manually added contract",
+        )
+        db.session.add(record)
+        db.session.commit()
+        flash(f"Contract added for {driver.name}. Print it, collect signatures, then upload signed copies in Step 2.", "success")
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Manual contract add failed for driver_id=%s", driver.id)
+        flash(f"Error adding contract: {exc}", "danger")
 
     return redirect(url_for("hr.dashboard_hr"))
 

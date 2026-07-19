@@ -638,7 +638,8 @@ img {
     transform: translateY(-1px);
 }
 
-.dobs-select option {
+.dobs-select option,
+.dobs-input option {
     color: #261533;
     background: #fff;
 }

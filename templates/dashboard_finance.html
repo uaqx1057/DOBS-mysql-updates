@@ -77,7 +77,7 @@
       <div class="modal-body">
         <div class="form-check mb-3"><input class="form-check-input" type="checkbox" name="transfer_fee_paid" value="y" id="feePaid" checked><label class="form-check-label" for="feePaid">{{ tr('Transfer Fee Paid', 'تم دفع رسوم التحويل') }}</label></div>
         <label class="form-label">{{ tr('Amount', 'المبلغ') }}</label><input class="form-control mb-3" name="transfer_fee_amount" placeholder="4000">
-        <label class="form-label">{{ tr('Paid At', 'تاريخ الدفع') }}</label><input type="datetime-local" class="form-control mb-3" name="transfer_fee_paid_at">
+        <label class="form-label">{{ tr('Paid At', 'تاريخ الدفع') }}</label><input type="datetime-local" step="1" class="form-control mb-3" name="transfer_fee_paid_at">
         <label class="form-label">{{ tr('Receipt', 'الإيصال') }}</label><input type="file" class="form-control" name="transfer_fee_receipt" accept=".jpg,.jpeg,.png,.pdf">
       </div>
       <div class="modal-footer">

@@ -75,7 +75,7 @@
   <div class="driver-cards" id="offboardingCards">
     {% for driver in offboarding_drivers %}
     {% set stage_index = offboarding_stage_sequence.index(driver.current_stage) if driver.current_stage in offboarding_stage_sequence else -1 %}
-    <div class="card reveal" style="grid-column: 1 / -1;" data-search="{{ driver.name }} {{ driver.iqama_number }}">
+    <div class="card driver-card reveal" style="grid-column: 1 / -1;" data-search="{{ driver.name }} {{ driver.iqama_number }}">
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
         <div>
           <h3 class="mb-1">{{ driver.name }}</h3>
@@ -176,6 +176,7 @@
 
         <label class="form-label">{{ tr('Driver Type', 'نوع السائق') }}</label>
         <select class="form-select mb-3" id="driverTypeSelect" name="driver_type_id" required>
+          <option value="" selected disabled>{{ tr('— Select driver type —', '— اختر نوع السائق —') }}</option>
           {% for dt in driver_types %}<option value="{{ dt.id }}" data-freelancer="{{ 'true' if dt.is_freelancer else 'false' }}">{{ dt.name }}</option>{% endfor %}
         </select>
 

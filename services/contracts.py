@@ -160,20 +160,30 @@ def _draw_overlay_text(pdf_canvas, text, x_mm, y_mm, page_height_pts, *, font_na
 
 
 def _wrap_canvas_text(text: str, font_name: str, font_size: int, max_width: float) -> list[str]:
-    words = (text or "").replace("\r", "").split()
-    if not words:
+    # Admins author body_content in a plain <textarea>, so a blank line
+    # there (e.g. to set off a fill-in-the-blank line like "Amount: ____")
+    # should render as a real line break rather than being swallowed by
+    # whitespace-collapsing .split() - so wrap each \n-separated segment
+    # independently instead of wrapping the whole text as one paragraph.
+    cleaned = (text or "").replace("\r", "")
+    if not cleaned.strip():
         return []
 
     lines: list[str] = []
-    current = words[0]
-    for word in words[1:]:
-        candidate = f"{current} {word}"
-        if pdfmetrics.stringWidth(candidate, font_name, font_size) <= max_width:
-            current = candidate
-        else:
-            lines.append(current)
-            current = word
-    lines.append(current)
+    for raw_line in cleaned.split("\n"):
+        words = raw_line.split()
+        if not words:
+            lines.append("")
+            continue
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            if pdfmetrics.stringWidth(candidate, font_name, font_size) <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
     return lines
 
 
@@ -290,7 +300,74 @@ def _draw_dual_value_field(
     return bottom - 10
 
 
-def _draw_bilingual_section(pdf_canvas, *, heading_en: str, heading_ar: str, body_en: str, body_ar: str, top_y: float, page_width: float, font_name: str) -> float:
+def _draw_bilingual_body_paginated(
+    pdf_canvas,
+    *,
+    left_text: str,
+    right_text: str,
+    page_width: float,
+    font_name: str,
+    font_size: int,
+    line_height_left: float,
+    line_height_right: float,
+    top_y: float,
+    content_top: float,
+    content_bottom: float,
+    new_page_fn,
+) -> float:
+    """Draw two columns of wrapped text line-by-line in lockstep, so that
+    when either column reaches the bottom margin both columns break to a
+    new page together (keeping EN/AR roughly side-by-side) instead of
+    running text off the bottom of a single page."""
+    left_margin, right_margin, gap, col_width = _preview_column_layout(page_width)
+    x_left = left_margin
+    x_right_edge = left_margin + col_width + gap + col_width
+
+    left_lines = _wrap_canvas_text(left_text, font_name, font_size, col_width)
+    right_lines = _wrap_canvas_text(right_text, font_name, font_size, col_width)
+    max_lines = max(len(left_lines), len(right_lines))
+
+    pdf_canvas.setFont(font_name, font_size)
+    cursor_y = top_y
+    box_top = top_y + 10
+
+    def draw_box(bottom: float):
+        _draw_section_box(pdf_canvas, left=x_left - 10, right=page_width - right_margin + 10, top=box_top, bottom=bottom)
+
+    for i in range(max_lines):
+        line_height = max(line_height_left, line_height_right)
+        if cursor_y - line_height < content_bottom:
+            draw_box(cursor_y)
+            new_page_fn()
+            pdf_canvas.setFont(font_name, font_size)
+            cursor_y = content_top
+            box_top = cursor_y + 10
+
+        if i < len(left_lines):
+            pdf_canvas.drawString(x_left, cursor_y, safe_pdf_text(left_lines[i], True))
+        if i < len(right_lines):
+            pdf_canvas.drawRightString(x_right_edge, cursor_y, safe_rtl_pdf_text(right_lines[i], True))
+
+        cursor_y -= line_height
+
+    draw_box(cursor_y)
+    return cursor_y
+
+
+def _draw_bilingual_section(
+    pdf_canvas,
+    *,
+    heading_en: str,
+    heading_ar: str,
+    body_en: str,
+    body_ar: str,
+    top_y: float,
+    page_width: float,
+    font_name: str,
+    content_top: float | None = None,
+    content_bottom: float | None = None,
+    new_page_fn=None,
+) -> float:
     left_margin, right_margin, gap, col_width = _preview_column_layout(page_width)
 
     pdf_canvas.setFillColor(colors.HexColor("#1f2937"))
@@ -298,8 +375,28 @@ def _draw_bilingual_section(pdf_canvas, *, heading_en: str, heading_ar: str, bod
     pdf_canvas.drawString(left_margin, top_y, safe_pdf_text(heading_en, True))
     pdf_canvas.drawRightString(page_width - right_margin, top_y, safe_rtl_pdf_text(heading_ar, True))
 
-    y_left = _draw_wrapped_text(pdf_canvas, body_en, left_margin, top_y - 22, col_width, font_name=font_name, font_size=11, line_height=16, rtl=False)
-    y_right = _draw_wrapped_text(pdf_canvas, body_ar, left_margin + col_width + gap, top_y - 22, col_width, font_name=font_name, font_size=11, line_height=18, rtl=True)
+    body_top = top_y - 22
+
+    if content_bottom is not None and new_page_fn is not None:
+        return _draw_bilingual_body_paginated(
+            pdf_canvas,
+            left_text=body_en,
+            right_text=body_ar,
+            page_width=page_width,
+            font_name=font_name,
+            font_size=11,
+            line_height_left=16,
+            line_height_right=18,
+            top_y=body_top,
+            content_top=content_top if content_top is not None else body_top,
+            content_bottom=content_bottom,
+            new_page_fn=new_page_fn,
+        )
+
+    # No page-break context supplied (e.g. a caller drawing a small fixed
+    # area): fall back to the original single-page behaviour.
+    y_left = _draw_wrapped_text(pdf_canvas, body_en, left_margin, body_top, col_width, font_name=font_name, font_size=11, line_height=16, rtl=False)
+    y_right = _draw_wrapped_text(pdf_canvas, body_ar, left_margin + col_width + gap, body_top, col_width, font_name=font_name, font_size=11, line_height=18, rtl=True)
     bottom_y = min(y_left, y_right)
     _draw_section_box(pdf_canvas, left=left_margin - 10, right=page_width - right_margin + 10, top=top_y + 10, bottom=bottom_y)
     return bottom_y
@@ -503,6 +600,9 @@ def _render_contract_template_system_preview(template: ContractTemplate, driver:
             top_y=y - 18,
             page_width=page_width,
             font_name=font_name,
+            content_top=content_top,
+            content_bottom=content_bottom,
+            new_page_fn=new_page,
         )
     else:
         y = y - 18
@@ -542,6 +642,9 @@ def _render_contract_template_system_preview(template: ContractTemplate, driver:
                 top_y=y - 8,
                 page_width=page_width,
                 font_name=font_name,
+                content_top=content_top,
+                content_bottom=content_bottom,
+                new_page_fn=new_page,
             )
 
         new_page()
@@ -576,6 +679,9 @@ def _render_contract_template_system_preview(template: ContractTemplate, driver:
                 top_y=y - 8,
                 page_width=page_width,
                 font_name=font_name,
+                content_top=content_top,
+                content_bottom=content_bottom,
+                new_page_fn=new_page,
             )
 
         new_page()
@@ -593,6 +699,9 @@ def _render_contract_template_system_preview(template: ContractTemplate, driver:
                 top_y=y - 8,
                 page_width=page_width,
                 font_name=font_name,
+                content_top=content_top,
+                content_bottom=content_bottom,
+                new_page_fn=new_page,
             )
         new_page()
 
@@ -608,6 +717,9 @@ def _render_contract_template_system_preview(template: ContractTemplate, driver:
             top_y=content_top,
             page_width=page_width,
             font_name=font_name,
+            content_top=content_top,
+            content_bottom=content_bottom,
+            new_page_fn=new_page,
         )
         new_page()
 
@@ -622,6 +734,9 @@ def _render_contract_template_system_preview(template: ContractTemplate, driver:
             top_y=content_top,
             page_width=page_width,
             font_name=font_name,
+            content_top=content_top,
+            content_bottom=content_bottom,
+            new_page_fn=new_page,
         )
         new_page()
 
@@ -830,6 +945,9 @@ def _render_contract_template_system_preview(template: ContractTemplate, driver:
         top_y=second_bottom - block_gap - 28,
         page_width=page_width,
         font_name=font_name,
+        content_top=content_top,
+        content_bottom=content_bottom,
+        new_page_fn=new_page,
     )
 
     pdf.save()
@@ -1010,12 +1128,212 @@ def render_contract_template_preview(template: ContractTemplate) -> bytes:
     return _render_contract_template_system_preview(template, sample_driver, business_name=business_name)
 
 
+_PNOTE_UNDERTAKING_EN = (
+    "I, the undersigned, hereby unconditionally undertake to pay to the order of speed logi "
+    "(the beneficiary) on demand the sum of"
+)
+_PNOTE_UNDERTAKING_AR = (
+    "أتعهد أنا الموقع أدناه بأنه أدفع بموجب هذا السند لأمر لشركة سبيد لوجي (المستفيد) عند الطلب مبلغ وقدره"
+)
+_PNOTE_RECOURSE_EN = (
+    "The holder of this note retains the right of recourse without incurring any cost, notice or "
+    "protest for non-payment."
+)
+_PNOTE_RECOURSE_AR = (
+    "وللحامل هذا السند حق الرجوع دون تحمل أي مصروفات أو إخطار أو احتجاج لعدم الوفاء."
+)
+
+
+# Exact Arabic spellings for name tokens common in the driver fleet; anything
+# not listed falls back to the phonetic letter mapping in
+# _transliterate_name_to_arabic below. Best-effort display aid only - the
+# legally binding spelling is whatever is printed on the driver's iqama.
+_NAME_TOKEN_AR = {
+    "mohammed": "محمد", "mohammad": "محمد", "muhammad": "محمد", "muhammed": "محمد", "md": "محمد",
+    "ahmed": "أحمد", "ahmad": "أحمد",
+    "ali": "علي", "omar": "عمر", "umar": "عمر", "osman": "عثمان", "usman": "عثمان",
+    "hasan": "حسن", "hassan": "حسن", "hossain": "حسين", "hussain": "حسين", "hussein": "حسين", "hosen": "حسين",
+    "abdul": "عبدال", "abdullah": "عبدالله", "abdur": "عبدالر", "abdus": "عبدالس",
+    "rahim": "رحيم", "karim": "كريم", "rahman": "رحمن", "rahaman": "رحمن",
+    "islam": "اسلام", "iman": "ايمان", "noor": "نور", "nur": "نور",
+    "uddin": "الدين", "udin": "الدين", "din": "دين",
+    "miah": "ميا", "mia": "ميا", "khan": "خان", "sheikh": "شيخ", "shaikh": "شيخ",
+    "abu": "أبو", "al": "ال", "ul": "ال", "bin": "بن", "ibn": "بن",
+    "ibrahim": "ابراهيم", "ismail": "اسماعيل", "yusuf": "يوسف", "yousuf": "يوسف",
+    "khalid": "خالد", "saeed": "سعيد", "said": "سعيد", "syed": "سيد", "sayed": "سيد",
+    "mahmud": "محمود", "mahmoud": "محمود", "mamun": "مأمون", "masud": "مسعود",
+    "jahangir": "جهانغير", "alam": "عالم", "kabir": "كبير", "jamal": "جمال",
+    "faisal": "فيصل", "salman": "سلمان", "sultan": "سلطان", "habib": "حبيب",
+    "aziz": "عزيز", "hamid": "حميد", "rashid": "رشيد", "sharif": "شريف",
+    "nazmul": "نجم ال", "emamul": "امام ال", "aminul": "امين ال", "mizanur": "ميزان الر",
+    "shahin": "شاهين", "shakil": "شاكيل", "sohel": "سوهيل", "rubel": "روبيل",
+}
+
+_LATIN_AR_DIGRAPHS = [
+    ("kh", "خ"), ("gh", "غ"), ("sh", "ش"), ("ch", "تش"), ("th", "ث"), ("dh", "ذ"), ("ph", "ف"),
+    ("aa", "ا"), ("ee", "ي"), ("ii", "ي"), ("oo", "و"), ("uu", "و"), ("ou", "و"), ("ai", "اي"), ("ay", "اي"),
+]
+_LATIN_AR_SINGLE = {
+    "b": "ب", "t": "ت", "j": "ج", "h": "ه", "d": "د", "r": "ر", "z": "ز", "s": "س",
+    "f": "ف", "q": "ق", "k": "ك", "l": "ل", "m": "م", "n": "ن", "w": "و", "y": "ي",
+    "p": "ب", "v": "ف", "g": "ج", "c": "ك", "x": "كس",
+    "a": "ا", "i": "ي", "e": "ي", "o": "و", "u": "و",
+}
+
+
+def _transliterate_name_to_arabic(name: str) -> str:
+    """Best-effort Latin-to-Arabic transliteration for showing the driver's
+    name on the Arabic side of generated forms. Dictionary hit per word
+    first, then a phonetic letter mapping (word-initial vowels become alif,
+    doubled consonants collapse). Not a legal rendering - the iqama print is
+    authoritative - but far more useful on a bilingual form than repeating
+    the Latin name in the Arabic cell."""
+    words_out = []
+    for word in (name or "").replace("-", " ").strip().split():
+        key = word.lower().strip(".-'")
+        if key in _NAME_TOKEN_AR:
+            words_out.append(_NAME_TOKEN_AR[key])
+            continue
+        out = []
+        i = 0
+        prev = ""
+        while i < len(key):
+            two = key[i:i + 2]
+            digraph = next((ar_ for la, ar_ in _LATIN_AR_DIGRAPHS if la == two), None)
+            if digraph:
+                out.append(digraph)
+                prev = two
+                i += 2
+                continue
+            ch = key[i]
+            if ch == prev and ch not in "aeiou":
+                i += 1  # collapse doubled consonants (Mamun/Mammun alike)
+                continue
+            mapped = _LATIN_AR_SINGLE.get(ch, "")
+            if ch in "aeiou" and i == 0:
+                mapped = "ا"
+            out.append(mapped)
+            prev = ch
+            i += 1
+        words_out.append("".join(out))
+    return " ".join(w for w in words_out if w)
+
+
+def _render_promissory_note_form(driver: Driver) -> bytes:
+    """Draws the PROMISSORY NOTE / سند لأمر form as native vector content
+    (boxes, borders, bilingual text) matching PN.png's layout and wording,
+    rather than overlaying text on a scanned image - the scan is a
+    photographed/slightly rotated page, so a fixed x/y overlay grid drifts
+    out of alignment row to row. Only fills in what the system actually
+    knows at this onboarding stage (issue date, driver name, iqama number,
+    city). Amount-in-numbers, amount-in-words, place of issuance, and
+    signature are intentionally left blank for hand completion at signing."""
+    font_name = register_unicode_font() or "Helvetica"
+    page_width, page_height = A4
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=(page_width, page_height))
+
+    mm = 72 / 25.4
+    margin = 15 * mm
+    left = margin
+    right = page_width - margin
+    width = right - left
+    label_w = 45 * mm
+    ar_label_w = 45 * mm
+    value_left = left + label_w
+    value_right = right - ar_label_w
+    y = page_height - margin
+
+    def en(x, y_, s, size=9):
+        pdf.setFont(font_name, size)
+        pdf.drawString(x, y_, safe_pdf_text(s, True))
+
+    def ar(x, y_, s, size=9):
+        pdf.setFont(font_name, size)
+        pdf.drawRightString(x, y_, safe_rtl_pdf_text(s, True))
+
+    def center(xc, y_, s, size, rtl=False):
+        pdf.setFont(font_name, size)
+        text = safe_rtl_pdf_text(s, True) if rtl else safe_pdf_text(s, True)
+        pdf.drawCentredString(xc, y_, text)
+
+    def box(x0, y0, x1, y1):
+        pdf.rect(x0, y0, x1 - x0, y1 - y0, stroke=1, fill=0)
+
+    _AR_DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+
+    def field_row(y_top, row_h, label_en_text, value_text, label_ar_text, value_ar_text=None):
+        # Two value cells, like the paper form: one after the English label
+        # and one before the Arabic label, so the filled data reads from
+        # both language sides.
+        box(left, y_top - row_h, right, y_top)
+        value_mid = (value_left + value_right) / 2
+        pdf.line(value_left, y_top - row_h, value_left, y_top)
+        pdf.line(value_mid, y_top - row_h, value_mid, y_top)
+        pdf.line(value_right, y_top - row_h, value_right, y_top)
+        baseline = y_top - row_h / 2 - 3
+        en(left + 3, baseline, label_en_text)
+        if value_text:
+            en(value_left + 4, baseline, value_text)
+            ar(value_right - 4, baseline, value_ar_text if value_ar_text is not None else value_text)
+        ar(right - 3, baseline, label_ar_text)
+        return y_top - row_h
+
+    def paragraph_row(y_top, row_h, text_en, text_ar):
+        box(left, y_top - row_h, right, y_top)
+        mid = (left + right) / 2
+        pdf.line(mid, y_top - row_h, mid, y_top)
+        _draw_wrapped_text(pdf, text_en, left + 4, y_top - 13, mid - left - 8, font_name=font_name, font_size=8.5, line_height=11, rtl=False)
+        _draw_wrapped_text(pdf, text_ar, mid + 4, y_top - 13, right - mid - 8, font_name=font_name, font_size=8.5, line_height=13, rtl=True)
+        return y_top - row_h
+
+    # Title
+    title_h = 18 * mm
+    box(left, y - title_h, right, y)
+    center((left + right) / 2, y - 8 * mm, "سند لأمر", 15, rtl=True)
+    center((left + right) / 2, y - 14.5 * mm, "PROMISSORY NOTE", 10)
+    y -= title_h + 6 * mm
+
+    # Date / place of issuance
+    issue_date = datetime.utcnow().strftime("%Y-%m-%d")
+    y = field_row(y, 10 * mm, "Date of Issuance:", issue_date, "تاريخ التحرير", issue_date.translate(_AR_DIGITS))
+    y = field_row(y, 10 * mm, "Place of Issuance:", "", "مكان التحرير")
+    y -= 6 * mm
+
+    # Amount in numbers (left blank for hand completion)
+    y = field_row(y, 12 * mm, "Saudi Riyals", "", "ريال سعودي")
+    y -= 6 * mm
+
+    # Maturity date + undertaking clause
+    y = field_row(y, 10 * mm, "Maturity Date:", "On Demand", "تاريخ الاستحقاق", "عند الطلب")
+    y = paragraph_row(y, 26 * mm, _PNOTE_UNDERTAKING_EN, _PNOTE_UNDERTAKING_AR)
+    y -= 6 * mm
+
+    # Amount in words (left blank for hand completion)
+    y = field_row(y, 12 * mm, "Amount in words:", "", "المبلغ كتابة")
+    y -= 6 * mm
+
+    # Recourse clause
+    y = paragraph_row(y, 22 * mm, _PNOTE_RECOURSE_EN, _PNOTE_RECOURSE_AR)
+    y -= 6 * mm
+
+    # Issuer details
+    iqama_no = getattr(driver, "iqaama_number", "") or ""
+    y = field_row(y, 11 * mm, "Issuer's Name:", driver.name or "", "اسم محرر السند", _transliterate_name_to_arabic(driver.name or ""))
+    y = field_row(y, 11 * mm, "ID / Iqama No.:", iqama_no, "رقم الهوية / الإقامة", iqama_no.translate(_AR_DIGITS))
+    y = field_row(y, 11 * mm, "Address:", getattr(driver, "city", "") or "", "العنوان")
+    y = field_row(y, 11 * mm, "Signature:", "", "التوقيع")
+
+    pdf.showPage()
+    pdf.save()
+    return buffer.getvalue()
+
+
 def generate_promissory_note(driver: Driver, uploaded_by_id=None) -> DriverDocument:
     """Generated at the first HR stage, before Ops Supervisor has assigned
-    any platform ID. One template covers every driver, regardless of driver
-    type or platform - configured in Workflow & Contracts > Promissory Note
-    Templates. Raises ContractTemplateMissingError - and generates nothing -
-    if that template doesn't exist yet, same policy as driver contracts."""
+    any platform ID. Renders the fixed PROMISSORY NOTE / سند لأمر form (see
+    _render_promissory_note_form) - not the admin-authored ContractTemplate
+    text, which only remains in use for driver_contract-kind templates."""
     label = "PromissoryNote"
     existing = DriverDocument.query.filter_by(
         driver_id=driver.id,
@@ -1025,13 +1343,7 @@ def generate_promissory_note(driver: Driver, uploaded_by_id=None) -> DriverDocum
     if existing:
         return existing
 
-    template = _resolve_template(business_id=None, driver_type_id=None, document_kind="promissory_note")
-    if not template:
-        raise ContractTemplateMissingError(
-            "No promissory note template configured yet. Ask a SuperAdmin to create it under "
-            "Workflow & Contracts before generating this driver's promissory note."
-        )
-    pdf_bytes = _render_contract_template_system_preview(template, driver)
+    pdf_bytes = _render_promissory_note_form(driver)
     return _save_contract_document(driver, "other", label, pdf_bytes, uploaded_by_id)
 
 

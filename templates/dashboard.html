@@ -12,7 +12,6 @@
   </div>
   <div class="d-flex gap-2">
     <button class="btn btn-primary" data-modal-open="driverModal" onclick="DobsUI._resetDriverForm && DobsUI._resetDriverForm()">+ {{ tr('Add Driver', 'إضافة سائق') }}</button>
-    <button class="btn btn-outline-primary" data-modal-open="userModal" onclick="DobsUI._resetUserForm && DobsUI._resetUserForm()">+ {{ tr('Add User', 'إضافة مستخدم') }}</button>
   </div>
 </div>
 
@@ -23,6 +22,7 @@
   <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_pending_onboarded or 0 }}">0</div><div class="stat-label">{{ tr('Pending Onboarded', 'انضمام معلق') }}</div></div>
   <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_completed_offboarded or 0 }}">0</div><div class="stat-label">{{ tr('Completed Offboarded', 'خروج مكتمل') }}</div></div>
   <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_pending_offboarded or 0 }}">0</div><div class="stat-label">{{ tr('Pending Offboarded', 'خروج معلق') }}</div></div>
+  <div class="stat-tile reveal"><div class="stat-value count-up" data-count-to="{{ total_rejected or 0 }}">0</div><div class="stat-label">{{ tr('Rejected', 'مرفوض') }}</div></div>
 </div>
 
 <div data-tabs class="tabs-bar">
@@ -30,14 +30,18 @@
   <button class="tab-btn" data-tab="onboarded">{{ tr('Fully Onboarded', 'انضمام مكتمل') }}</button>
   <button class="tab-btn" data-tab="pending-off">{{ tr('Pending Offboarding', 'خروج معلق') }}</button>
   <button class="tab-btn" data-tab="fully-off">{{ tr('Fully Offboarded', 'خروج مكتمل') }}</button>
-  <button class="tab-btn" data-tab="users">{{ tr('Users', 'المستخدمون') }}</button>
+  <button class="tab-btn" data-tab="rejected">{{ tr('Rejected', 'مرفوض') }}</button>
 </div>
 
 <!-- Pending drivers -->
 <div data-tab-panel="pending" class="tab-panel">
-  <div class="search-bar"><span class="search-icon">&#128269;</span>
+  <div class="search-bar search-bar--with-stage-filter"><span class="search-icon">&#128269;</span>
     <input type="text" class="form-control" value="{{ q or '' }}" data-filter-cards="#pendingCards .driver-card"
            placeholder="{{ tr('Search by name or iqama...', 'ابحث بالاسم أو رقم الإقامة...') }}">
+    <select class="form-select" data-stage-filter="#pendingCards .driver-card" aria-label="{{ tr('Filter onboarding stage', 'تصفية مرحلة الانضمام') }}">
+      <option value="">{{ tr('All onboarding stages', 'كل مراحل الانضمام') }}</option>
+      {% for stage in onboarding_filter_stages %}<option value="{{ stage }}">{{ stage }}</option>{% endfor %}
+    </select>
   </div>
   <div class="d-flex justify-content-between align-items-center mb-2">
     <span class="text-secondary small">{{ tr('Page', 'صفحة') }} {{ page }} · {{ per_page }} {{ tr('per page', 'لكل صفحة') }}</span>
@@ -48,7 +52,7 @@
   </div>
   <div class="driver-cards" id="pendingCards">
     {% for driver in drivers if driver.onboarding_stage != "Completed" %}
-    <div class="driver-card reveal" data-search="{{ driver.name }} {{ driver.iqaama_number }}" data-driver='{{ driver | tojson | safe }}'>
+    <div class="driver-card reveal" data-stage="{{ driver.onboarding_stage or '' }}" data-search="{{ driver.name }} {{ driver.iqaama_number }}" data-driver='{{ driver | tojson | safe }}'>
       <h3>{{ driver.name }}</h3>
       <p>{{ tr('Iqama', 'الإقامة') }}: {{ driver.iqaama_number or '' }}</p>
       <p><span class="badge-soft info">{{ driver.onboarding_stage or '' }}</span></p>
@@ -74,7 +78,7 @@
   </div>
   <div class="driver-cards" id="onboardedCards">
     {% for driver in fully_onboarded_drivers %}
-    <div class="driver-card reveal" data-search="{{ driver.name }} {{ driver.iqaama_number }}" data-driver='{{ driver | tojson | safe }}'>
+    <div class="driver-card reveal" data-stage="{{ driver.onboarding_stage or '' }}" data-search="{{ driver.name }} {{ driver.iqaama_number }}" data-driver='{{ driver | tojson | safe }}'>
       <h3>{{ driver.name }}</h3>
       <p>{{ tr('Iqama', 'الإقامة') }}: {{ driver.iqaama_number or '' }}</p>
       <p><span class="badge-soft success">{{ tr('Completed', 'مكتمل') }}</span></p>
@@ -95,12 +99,16 @@
 
 <!-- Pending offboarding -->
 <div data-tab-panel="pending-off" class="tab-panel" hidden>
-  <div class="search-bar"><span class="search-icon">&#128269;</span>
+  <div class="search-bar search-bar--with-stage-filter"><span class="search-icon">&#128269;</span>
     <input type="text" class="form-control" data-filter-cards="#pendingOffCards .driver-card" placeholder="{{ tr('Search...', 'بحث...') }}">
+    <select class="form-select" data-stage-filter="#pendingOffCards .driver-card" aria-label="{{ tr('Filter offboarding stage', 'تصفية مرحلة الخروج') }}">
+      <option value="">{{ tr('All offboarding stages', 'كل مراحل الخروج') }}</option>
+      {% for value, label in offboarding_filter_stages %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
   </div>
   <div class="driver-cards" id="pendingOffCards">
     {% for driver in pending_offboarding_drivers %}
-    <div class="driver-card offboarding-card reveal" data-search="{{ driver.name }} {{ driver.iqaama_number }}" data-driver='{{ driver | tojson | safe }}'>
+    <div class="driver-card offboarding-card reveal" data-stage="{{ driver.offboarding_stage or '' }}" data-search="{{ driver.name }} {{ driver.iqaama_number }}" data-driver='{{ driver | tojson | safe }}'>
       <h3>{{ driver.name }}</h3>
       <p>{{ tr('Iqama', 'الإقامة') }}: {{ driver.iqaama_number }}</p>
       <p><span class="badge-soft warning pulse">{{ driver.offboarding_stage or tr('Pending', 'معلق') }}</span></p>
@@ -113,9 +121,12 @@
 
 <!-- Fully offboarded -->
 <div data-tab-panel="fully-off" class="tab-panel" hidden>
-  <div class="driver-cards">
+  <div class="search-bar"><span class="search-icon">&#128269;</span>
+    <input type="text" class="form-control" data-filter-cards="#completedOffCards .driver-card" placeholder="{{ tr('Search...', 'بحث...') }}">
+  </div>
+  <div class="driver-cards" id="completedOffCards">
     {% for driver in completed_offboarding_drivers %}
-    <div class="driver-card offboarding-card reveal" data-driver='{{ driver | tojson | safe }}'>
+    <div class="driver-card offboarding-card reveal" data-stage="{{ driver.offboarding_stage or '' }}" data-search="{{ driver.name }} {{ driver.iqaama_number }}" data-driver='{{ driver | tojson | safe }}'>
       <h3>{{ driver.name }}</h3>
       <p>{{ tr('Iqama', 'الإقامة') }}: {{ driver.iqaama_number or '' }}</p>
       <p><span class="badge-soft neutral">{{ driver.offboarding_stage or '' }}</span></p>
@@ -126,36 +137,31 @@
   </div>
 </div>
 
-<!-- Users -->
-<div data-tab-panel="users" class="tab-panel" hidden>
+<!-- Rejected -->
+<div data-tab-panel="rejected" class="tab-panel" hidden>
   <div class="search-bar"><span class="search-icon">&#128269;</span>
-    <input type="text" class="form-control" data-filter-cards="#usersList .card" placeholder="{{ tr('Search users...', 'بحث عن مستخدمين...') }}">
+    <input type="text" class="form-control" data-filter-cards="#rejectedCards .driver-card" placeholder="{{ tr('Search...', 'بحث...') }}">
   </div>
-  <div id="usersList" class="d-flex flex-column gap-2">
-    {% for user in users %}
-    <div class="card reveal d-flex flex-row justify-content-between align-items-center" data-search="{{ user.get('name') }} {{ user.get('username') }} {{ user.get('role') }}">
-      <div>
-        <strong>{{ user.get('name') or user.get('username') }}</strong>
-        <span class="badge-soft info ms-2">{{ user.get('role') }}</span>
-        <div class="text-secondary small">{{ user.get('email') or '' }} &middot; {{ user.get('designation') or '' }}</div>
-      </div>
-      <div class="d-flex gap-2">
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-edit-user='{{ user | tojson }}'>{{ tr('Edit', 'تعديل') }}</button>
-        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.user_access', user_id=user.get('id')) }}">{{ tr('Access', 'الصلاحيات') }}</a>
-        {% if can_impersonate and user.get('id') != current_user.id %}
-        <form method="POST" action="{{ url_for('admin.impersonate_user', user_id=user.get('id')) }}">
+  <div class="driver-cards" id="rejectedCards">
+    {% for driver in rejected_drivers %}
+    <div class="driver-card reveal" data-search="{{ driver.name }} {{ driver.iqaama_number }}" data-driver='{{ driver | tojson | safe }}'>
+      <h3>{{ driver.name }}</h3>
+      <p>{{ tr('Iqama', 'الإقامة') }}: {{ driver.iqaama_number or '' }}</p>
+      <p><span class="badge-soft danger">{{ tr('Rejected by', 'مرفوض من') }}: {{ driver.rejected_by_stage or '' }}</span></p>
+      {% if driver.reject_reason %}<p class="text-secondary small">{{ tr('Reason', 'السبب') }}: {{ driver.reject_reason }}</p>{% endif %}
+      <div class="d-flex gap-2 mt-2">
+        <form method="POST" action="{{ url_for('admin.reactivate_driver', driver_id=driver.id) }}" onclick="event.stopPropagation()">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn btn-sm btn-outline-warning">{{ tr('Impersonate', 'انتحال الهوية') }}</button>
+          <button type="submit" class="btn btn-sm btn-outline-success" onclick="return confirm('{{ tr('Reactivate this driver? They will restart onboarding from Ops Manager.', 'إعادة تفعيل هذا السائق؟ سيعاد بدء الانضمام من مشرف العمليات.') }}')">{{ tr('Reactivate', 'إعادة التفعيل') }}</button>
         </form>
-        {% endif %}
-        <form method="POST" action="{{ url_for('admin.delete_user', user_id=user.get('id')) }}">
+        <form method="POST" action="{{ url_for('admin.delete_driver', driver_id=driver.id) }}" onclick="event.stopPropagation()">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('{{ tr('Delete this user?', 'حذف هذا المستخدم؟') }}')">{{ tr('Delete', 'حذف') }}</button>
+          <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('{{ tr('Delete this driver?', 'حذف هذا السائق؟') }}')">{{ tr('Delete', 'حذف') }}</button>
         </form>
       </div>
     </div>
     {% else %}
-    <p class="text-muted">{{ tr('No users found.', 'لا يوجد مستخدمون.') }}</p>
+    <p class="text-muted">{{ tr('No rejected drivers found.', 'لا يوجد سائقون مرفوضون.') }}</p>
     {% endfor %}
   </div>
 </div>
@@ -169,13 +175,23 @@
 </div>
 
 <!-- ===================== Add/Edit driver modal ===================== -->
+<style>
+  #driverModal .driver-form-section { border: 1px solid #e6e0ee; border-radius: 12px; margin-bottom: 12px; overflow: hidden; }
+  #driverModal .driver-form-section summary { cursor: pointer; list-style: none; padding: 13px 16px; font-weight: 700; color: #37224d; background: #fbf9fd; }
+  #driverModal .driver-form-section summary::-webkit-details-marker { display: none; }
+  #driverModal .driver-form-section summary::after { content: '+'; float: right; font-size: 20px; line-height: 16px; color: #7650a8; }
+  #driverModal .driver-form-section[open] summary::after { content: '−'; }
+  #driverModal .driver-form-section > .driver-section-body { padding: 16px; }
+</style>
 <div class="modal" id="driverModal">
   <div class="modal-content" style="max-width:900px;">
     <div class="modal-header"><h3 id="driverModalTitle">{{ tr('Add Driver', 'إضافة سائق') }}</h3><button class="modal-close" data-modal-close>&times;</button></div>
     <form id="driverForm" method="POST" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="modal-body">
-        <h4 class="text-secondary small text-uppercase">{{ tr('Personal Information', 'المعلومات الشخصية') }}</h4>
+        <details class="driver-form-section" open>
+          <summary>{{ tr('Personal Information', 'المعلومات الشخصية') }}</summary>
+          <div class="driver-section-body">
         <div class="row g-3 mb-4">
           <div class="col-md-4"><label class="form-label">{{ tr('Full Name', 'الاسم الكامل') }}</label><input class="form-control" name="name" required></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Iqama Number', 'رقم الإقامة') }}</label><input class="form-control" name="iqaama_number" required></div>
@@ -196,11 +212,35 @@
           </div>
         </div>
 
-        <h4 class="text-secondary small text-uppercase">{{ tr('Platform / Business Assignment', 'تعيين المنصة / النشاط') }}</h4>
+          </div>
+        </details>
+
+        <details class="driver-form-section">
+          <summary>{{ tr('Onboarding Status', 'حالة الانضمام') }}</summary>
+          <div class="driver-section-body">
+        <div class="row g-3 mb-4">
+          <div class="col-md-4"><label class="form-label">{{ tr('Ops Manager Approved', 'موافقة مدير العمليات') }}</label>
+            <select class="form-select" name="ops_manager_approved"><option value="false">{{ tr('No', 'لا') }}</option><option value="true">{{ tr('Yes', 'نعم') }}</option></select>
+          </div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Ops Manager Approved At', 'تاريخ موافقة مدير العمليات') }}</label><input type="datetime-local" step="1" class="form-control" name="ops_manager_approved_at"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('HR Approved At', 'تاريخ موافقة الموارد البشرية') }}</label><input type="datetime-local" step="1" class="form-control" name="hr_approved_at"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Ops Supervisor Approved At', 'تاريخ موافقة مشرف العمليات') }}</label><input type="datetime-local" step="1" class="form-control" name="ops_supervisor_approved_at"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Fleet Manager Approved At', 'تاريخ موافقة مدير الأسطول') }}</label><input type="datetime-local" step="1" class="form-control" name="fleet_manager_approved_at"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Finance Approved At', 'تاريخ موافقة المالية') }}</label><input type="datetime-local" step="1" class="form-control" name="finance_approved_at"></div>
+        </div>
+          </div>
+        </details>
+
+        <details class="driver-form-section">
+          <summary>{{ tr('Platform / Business Assignment', 'تعيين المنصة / النشاط') }}</summary>
+          <div class="driver-section-body">
         <div id="businessContainer" class="mb-2"></div>
         <button type="button" id="addBusinessBtn" class="btn btn-sm btn-outline-primary mb-4">+ {{ tr('Add Business', 'إضافة نشاط') }}</button>
-
-        <h4 class="text-secondary small text-uppercase">{{ tr('Device & Vehicle', 'الجهاز والمركبة') }}</h4>
+          </div>
+        </details>
+        <details class="driver-form-section">
+          <summary>{{ tr('Device & Vehicle', 'الجهاز والمركبة') }}</summary>
+          <div class="driver-section-body">
         <div class="row g-3 mb-4">
           <div class="col-md-4"><label class="form-label">{{ tr('Issued Mobile Number', 'رقم الجوال الصادر') }}</label><input class="form-control" name="issued_mobile_number"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Issued Device ID', 'رقم الجهاز الصادر') }}</label><input class="form-control" name="issued_device_id"></div>
@@ -214,8 +254,12 @@
           </div>
           <div class="col-md-4"><label class="form-label">{{ tr('TAMM Screenshot', 'لقطة شاشة تام') }}</label><input type="file" class="form-control" name="tamm_authorization_ss" accept=".jpg,.jpeg,.png,.pdf"></div>
         </div>
+          </div>
+        </details>
 
-        <h4 class="text-secondary small text-uppercase">{{ tr('Financial / Transfer', 'المالية / التحويل') }}</h4>
+        <details class="driver-form-section">
+          <summary>{{ tr('Financial / Transfer', 'المالية / التحويل') }}</summary>
+          <div class="driver-section-body">
         <div class="row g-3 mb-4">
           <div class="col-md-4"><label class="form-label">{{ tr('Transfer Fee Paid', 'تم دفع رسوم التحويل') }}</label>
             <select class="form-select" name="transfer_fee_paid"><option value="false">{{ tr('No', 'لا') }}</option><option value="true">{{ tr('Yes', 'نعم') }}</option></select>
@@ -223,48 +267,38 @@
           <div class="col-md-4"><label class="form-label">{{ tr('Transfer Fee Amount', 'مبلغ رسوم التحويل') }}</label>
             <select class="form-select" name="transfer_fee_amount"><option value="2000">2000 SAR</option><option value="4000">4000 SAR</option><option value="6000">6000 SAR</option></select>
           </div>
-          <div class="col-md-4"><label class="form-label">{{ tr('Transfer Fee Paid At', 'تاريخ دفع الرسوم') }}</label><input type="datetime-local" class="form-control" name="transfer_fee_paid_at"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Transfer Fee Paid At', 'تاريخ دفع الرسوم') }}</label><input type="datetime-local" step="1" class="form-control" name="transfer_fee_paid_at"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Transfer Fee Receipt', 'إيصال رسوم التحويل') }}</label><input type="file" class="form-control" name="transfer_fee_receipt" accept=".jpg,.jpeg,.png,.pdf"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Sponsorship Transfer Proof', 'إثبات نقل الكفالة') }}</label><input type="file" class="form-control" name="sponsorship_transfer_proof" accept=".jpg,.jpeg,.png,.pdf"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Qiwa Contract Status', 'حالة عقد قوى') }}</label><input class="form-control" name="qiwa_contract_status" placeholder="Pending"></div>
         </div>
+          </div>
+        </details>
 
-        <h4 class="text-secondary small text-uppercase">{{ tr('Documents', 'المستندات') }}</h4>
+        <details class="driver-form-section">
+          <summary>{{ tr('Documents', 'المستندات') }}</summary>
+          <div class="driver-section-body">
         <div class="row g-3">
+          <div class="col-md-4"><label class="form-label">{{ tr('Iqama Card', 'بطاقة الإقامة') }}</label><input type="file" class="form-control" name="iqama_card_upload" accept=".jpg,.jpeg,.png,.pdf"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Driving License', 'رخصة القيادة') }}</label><input type="file" class="form-control" name="driving_license_upload" accept=".jpg,.jpeg,.png,.pdf"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Passport', 'جواز السفر') }}</label><input type="file" class="form-control" name="passport_upload" accept=".jpg,.jpeg,.png,.pdf"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Company Contract File', 'ملف عقد الشركة') }}</label><input type="file" class="form-control" name="company_contract_file" accept=".jpg,.jpeg,.png,.pdf"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Promissory Note File', 'ملف السند الإذني') }}</label><input type="file" class="form-control" name="promissory_note_file" accept=".jpg,.jpeg,.png,.pdf"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Qiwa Contract File', 'ملف عقد قوى') }}</label><input type="file" class="form-control" name="qiwa_contract_file" accept=".jpg,.jpeg,.png,.pdf"></div>
+        </div>
+          </div>
+        </details>
+        <div class="border rounded-3 p-3 mt-2 bg-light">
+          <label class="form-label fw-bold">{{ tr('Onboarding Stage', 'مرحلة الانضمام') }}</label>
+          <select class="form-select" name="onboarding_stage">
+            {% for stage in onboarding_stages %}<option value="{{ stage }}">{{ stage }}</option>{% endfor %}
+          </select>
+          <div class="form-text">{{ tr('Choose the current stage, then save all changes.', 'اختر المرحلة الحالية ثم احفظ كل التغييرات.') }}</div>
         </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
         <button type="submit" class="btn btn-primary" id="driverFormSubmit">{{ tr('Create Driver', 'إنشاء سائق') }}</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- ===================== Add/Edit user modal ===================== -->
-<div class="modal" id="userModal">
-  <div class="modal-content" style="max-width:520px;">
-    <div class="modal-header"><h3 id="userModalTitle">{{ tr('Add User', 'إضافة مستخدم') }}</h3><button class="modal-close" data-modal-close>&times;</button></div>
-    <form id="userForm" method="POST">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="modal-body">
-        <label class="form-label">{{ tr('Username', 'اسم المستخدم') }}</label><input class="form-control mb-3" name="username" required>
-        <div id="userPasswordField"><label class="form-label">{{ tr('Password', 'كلمة المرور') }}</label><input type="password" class="form-control mb-3" name="password"></div>
-        <label class="form-label">{{ tr('Role', 'الدور') }}</label>
-        <select class="form-select mb-3" name="role" required>
-          {% for r in all_roles %}<option value="{{ r.name }}">{{ r.name }}</option>{% endfor %}
-        </select>
-        <label class="form-label">{{ tr('Name', 'الاسم') }}</label><input class="form-control mb-3" name="name">
-        <label class="form-label">{{ tr('Designation', 'المسمى الوظيفي') }}</label><input class="form-control mb-3" name="designation">
-        <label class="form-label">{{ tr('Branch City', 'مدينة الفرع') }}</label><input class="form-control mb-3" name="branch_city">
-        <label class="form-label">{{ tr('Email', 'البريد الإلكتروني') }}</label><input type="email" class="form-control" name="email">
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Cancel', 'إلغاء') }}</button>
-        <button type="submit" class="btn btn-primary">{{ tr('Save', 'حفظ') }}</button>
       </div>
     </form>
   </div>
@@ -341,51 +375,113 @@
     });
   });
 
+  document.querySelectorAll('[data-stage-filter]').forEach(function (filter) {
+    filter.addEventListener('change', function () {
+      var selectedStage = filter.value;
+      document.querySelectorAll(filter.dataset.stageFilter).forEach(function (card) {
+        card.hidden = Boolean(selectedStage && card.dataset.stage !== selectedStage);
+      });
+    });
+  });
+
+  var branchesById = {};
+  ({{ branches_json | safe }}).forEach(function (b) { branchesById[b.id] = b.name; });
+
+  function fieldRow(labelEn, labelAr, value) {
+    if (value === null || value === undefined || value === '') value = '—';
+    return '<div class="col-6"><span class="form-label">' + esc(tr(labelEn, labelAr)) + '</span><div>' + esc(value) + '</div></div>';
+  }
+
+  function tr(en, ar) {
+    return {{ 'true' if current_lang == 'ar' else 'false' }} ? ar : en;
+  }
+
+  function docLink(labelEn, labelAr, url) {
+    if (!url) return '';
+    var isImage = /\.(jpe?g|png|gif|webp)$/i.test(url);
+    var preview = isImage
+      ? '<br><img src="' + url + '" style="max-width:180px;max-height:180px;border-radius:8px;margin-top:4px;">'
+      : '';
+    return '<div class="col-md-4"><span class="form-label">' + esc(tr(labelEn, labelAr)) + '</span><br>' +
+      '<a href="' + url + '" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary mt-1">' + esc(tr('View', 'عرض')) + '</a>' +
+      preview + '</div>';
+  }
+
   document.querySelectorAll('[data-view-driver]').forEach(function (btn) {
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
       var card = btn.closest('.driver-card');
       var d = JSON.parse(card.dataset.driver || '{}');
-      var html = '<div class="row g-3">' +
-        '<div class="col-6"><span class="form-label">{{ tr("Name","الاسم") }}</span><div>' + esc(d.name) + '</div></div>' +
-        '<div class="col-6"><span class="form-label">{{ tr("Iqama","الإقامة") }}</span><div>' + esc(d.iqaama_number) + '</div></div>' +
-        '<div class="col-6"><span class="form-label">{{ tr("Nationality","الجنسية") }}</span><div>' + esc(d.nationality) + '</div></div>' +
-        '<div class="col-6"><span class="form-label">{{ tr("Mobile","الجوال") }}</span><div>' + esc(d.absher_number) + '</div></div>' +
-        '<div class="col-6"><span class="form-label">{{ tr("City","المدينة") }}</span><div>' + esc(d.city) + '</div></div>' +
-        '<div class="col-6"><span class="form-label">{{ tr("Stage","المرحلة") }}</span><div>' + esc(d.onboarding_stage) + '</div></div>' +
-        '</div>';
-      if (d.iqama_card_upload_url) {
-        html += '<div class="mt-3"><span class="form-label">{{ tr("Iqama Card","بطاقة الإقامة") }}</span><br><img src="' + d.iqama_card_upload_url + '" style="max-width:220px;border-radius:8px;"></div>';
+
+      var html = '<h4 class="text-secondary small text-uppercase">' + esc(tr('Personal Information', 'المعلومات الشخصية')) + '</h4>' +
+        '<div class="row g-3 mb-3">' +
+        fieldRow('Name', 'الاسم', d.name) +
+        fieldRow('Iqama Number', 'رقم الإقامة', d.iqaama_number) +
+        fieldRow('Iqama Expiry', 'انتهاء الإقامة', d.iqaama_expiry) +
+        fieldRow('Nationality', 'الجنسية', d.nationality) +
+        fieldRow('Mobile (Absher)', 'الجوال (أبشر)', d.absher_number) +
+        fieldRow('City', 'المدينة', d.city) +
+        fieldRow('Branch', 'الفرع', branchesById[d.branch_id]) +
+        fieldRow('Saudi Driving License', 'رخصة قيادة سعودية', d.saudi_driving_license ? tr('Yes', 'نعم') : tr('No', 'لا')) +
+        fieldRow('Previous Sponsor Transfers', 'تحويلات الكفالة السابقة', d.previous_sponsor_number) +
+        '</div>' +
+
+        '<h4 class="text-secondary small text-uppercase">' + esc(tr('Onboarding Status', 'حالة الانضمام')) + '</h4>' +
+        '<div class="row g-3 mb-3">' +
+        fieldRow('Stage', 'المرحلة', d.onboarding_stage);
+
+      if (d.onboarding_stage === 'Rejected') {
+        html += fieldRow('Rejected By', 'مرفوض من', d.rejected_by_stage) +
+          fieldRow('Rejected At', 'تاريخ الرفض', d.rejected_at) +
+          fieldRow('Reject Reason', 'سبب الرفض', d.reject_reason);
       }
+
+      html += fieldRow('Ops Manager Approved At', 'تاريخ موافقة مدير العمليات', d.ops_manager_approved_at) +
+        fieldRow('Ops Supervisor Approved At', 'تاريخ موافقة مشرف العمليات', d.ops_supervisor_approved_at) +
+        fieldRow('Fleet Manager Approved At', 'تاريخ موافقة مدير الأسطول', d.fleet_manager_approved_at) +
+        fieldRow('Finance Approved At', 'تاريخ موافقة المالية', d.finance_approved_at) +
+        fieldRow('HR Approved At', 'تاريخ موافقة الموارد البشرية', d.hr_approved_at) +
+        '</div>' +
+
+        '<h4 class="text-secondary small text-uppercase">' + esc(tr('Device & Vehicle', 'الجهاز والمركبة')) + '</h4>' +
+        '<div class="row g-3 mb-3">' +
+        fieldRow('Issued Mobile Number', 'رقم الجوال الصادر', d.issued_mobile_number) +
+        fieldRow('Issued Device ID', 'رقم الجهاز الصادر', d.issued_device_id) +
+        fieldRow('Car Details', 'تفاصيل المركبة', d.car_details) +
+        fieldRow('Assignment Date', 'تاريخ التعيين', d.assignment_date) +
+        fieldRow('TAMM Authorized', 'مفوض تام', d.tamm_authorized ? tr('Yes', 'نعم') : tr('No', 'لا')) +
+        '</div>' +
+
+        '<h4 class="text-secondary small text-uppercase">' + esc(tr('Financial / Transfer', 'المالية / التحويل')) + '</h4>' +
+        '<div class="row g-3 mb-3">' +
+        fieldRow('Transfer Fee Paid', 'تم دفع رسوم التحويل', d.transfer_fee_paid ? tr('Yes', 'نعم') : tr('No', 'لا')) +
+        fieldRow('Transfer Fee Amount', 'مبلغ رسوم التحويل', d.transfer_fee_amount) +
+        fieldRow('Transfer Fee Paid At', 'تاريخ دفع الرسوم', d.transfer_fee_paid_at) +
+        fieldRow('Qiwa Contract Status', 'حالة عقد قوى', d.qiwa_contract_status) +
+        fieldRow('Sponsorship Transfer Status', 'حالة نقل الكفالة', d.sponsorship_transfer_status) +
+        '</div>' +
+
+        '<h4 class="text-secondary small text-uppercase">' + esc(tr('Documents', 'المستندات')) + '</h4>' +
+        '<div class="row g-3">' +
+        docLink('Iqama Card', 'بطاقة الإقامة', d.iqama_card_upload_url) +
+        docLink('Driving License', 'رخصة القيادة', d.driving_license_upload_url) +
+        docLink('Passport', 'جواز السفر', d.passport_upload_url) +
+        docLink('Company Contract', 'عقد الشركة', d.company_contract_file_url) +
+        docLink('Promissory Note', 'السند الإذني', d.promissory_note_file_url) +
+        docLink('Qiwa Contract', 'عقد قوى', d.qiwa_contract_file_url) +
+        docLink('Transfer Fee Receipt', 'إيصال رسوم التحويل', d.transfer_fee_receipt_url) +
+        docLink('Sponsorship Transfer Proof', 'إثبات نقل الكفالة', d.sponsorship_transfer_proof_url) +
+        docLink('TAMM Authorization', 'تفويض تام', d.tamm_authorization_ss_url) +
+        (d.documents || []).map(function (doc) {
+          return docLink(doc.label || 'Document', 'مستند', doc.url);
+        }).join('') +
+        '</div>';
+
       document.getElementById('viewDriverContent').innerHTML = html;
       DobsUI.openModal('viewDriverModal');
     });
   });
 
-  DobsUI._resetUserForm = function () {
-    var form = document.getElementById('userForm');
-    form.reset();
-    form.action = "{{ url_for('admin.add_user') }}";
-    document.getElementById('userModalTitle').textContent = {{ tr('Add User', 'إضافة مستخدم') | tojson }};
-    document.getElementById('userPasswordField').style.display = '';
-    form.elements['password'].required = true;
-  };
-
-  document.querySelectorAll('[data-edit-user]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var u = JSON.parse(btn.getAttribute('data-edit-user') || '{}');
-      var form = document.getElementById('userForm');
-      form.reset();
-      ['username', 'role', 'name', 'designation', 'branch_city', 'email'].forEach(function (key) {
-        if (form.elements[key]) form.elements[key].value = u[key] || '';
-      });
-      form.action = '/dashboard/edit_user/' + u.id;
-      document.getElementById('userModalTitle').textContent = {{ tr('Edit User', 'تعديل مستخدم') | tojson }};
-      document.getElementById('userPasswordField').style.display = 'none';
-      form.elements['password'].required = false;
-      DobsUI.openModal('userModal');
-    });
-  });
 
   document.querySelectorAll('.offboarding-card').forEach(function (card) {
     card.addEventListener('click', function () {

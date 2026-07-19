@@ -9,7 +9,7 @@
   <button type="submit" class="btn btn-sm btn-outline-warning">{{ tr('Impersonate', 'انتحال الهوية') }}</button>
 </form>
 {% endif %}
-<a href="{{ url_for('admin.dashboard') }}" class="nav-btn">&larr; {{ tr('Back to Dashboard', 'العودة للوحة التحكم') }}</a>
+<a href="{{ url_for('admin.users') }}" class="nav-btn">&larr; {{ tr('Back to Users', 'العودة للمستخدمين') }}</a>
 {% endblock %}
 
 {% block content %}

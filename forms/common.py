@@ -151,11 +151,11 @@ class PublicRegisterForm(FlaskForm):
     )
     driving_license_upload = FileField(
         "Driving License",
-        validators=[FileRequired(message="Driving license upload is required."), FileAllowed(["png", "jpg", "jpeg", "pdf"], "Images or PDF only")],
+        validators=[Optional(), FileAllowed(["png", "jpg", "jpeg", "pdf"], "Images or PDF only")],
     )
     passport_upload = FileField(
         "Passport",
-        validators=[FileRequired(message="Passport upload is required."), FileAllowed(["png", "jpg", "jpeg", "pdf"], "Images or PDF only")],
+        validators=[Optional(), FileAllowed(["png", "jpg", "jpeg", "pdf"], "Images or PDF only")],
     )
 
 

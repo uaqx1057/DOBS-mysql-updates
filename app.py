@@ -327,6 +327,7 @@ def create_app():
                 ("Dashboard", "لوحة التحكم", "admin.dashboard", "admin", None, "grid"),
             ]),
             ("Manage", "الإدارة", [
+                ("Users", "المستخدمون", "admin.users", None, "admin.users", "users"),
                 ("Workflow Configuration", "إعداد سير العمل", "admin.workflow_config", None, "admin.workflow_config", "workflow"),
                 ("Driver Contract Templates", "قوالب عقود السائقين", "admin.contract_templates", None, "admin.contract_templates", "clipboard"),
                 ("Promissory Note Templates", "قوالب سند لأمر", "admin.promissory_note_templates", None, "admin.promissory_note_templates", "clipboard"),

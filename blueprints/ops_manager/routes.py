@@ -559,6 +559,14 @@ def reject_offboarding(driver_id):
     driver.offboard_reason = None
     driver.offboard_requested_at = None
 
+    # Also discard the real in-flight Offboarding record. Clearing only the
+    # legacy Driver flags above left this row behind at status "Requested"/
+    # "OpsSupervisor", so Ops Supervisor's queue (which reads Offboarding.status
+    # directly) kept showing the driver as pending even after rejection here.
+    open_offboarding = offboarding_workflow.get_open_offboarding(driver)
+    if open_offboarding:
+        db.session.delete(open_offboarding)
+
     try:
         db.session.commit()
         flash(f"❌ Offboarding request for {driver.name} has been rejected.", "success")

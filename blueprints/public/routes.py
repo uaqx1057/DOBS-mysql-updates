@@ -156,12 +156,15 @@ def register():
         city = form.city.data
         previous_sponsor_number = form.previous_sponsor_number.data
 
-        # Iqama, driving license, and passport are all required uploads.
+        # Iqama is required. A licence is required only for drivers who have
+        # one, while passport is optional at registration.
         uploads = {
             "iqama": (form.iqama_card_upload.data, "Iqama card"),
-            "license": (form.driving_license_upload.data, "Driving license"),
-            "passport": (form.passport_upload.data, "Passport"),
         }
+        if saudi_driving_license:
+            uploads["license"] = (form.driving_license_upload.data, "Driving license")
+        if form.passport_upload.data and form.passport_upload.data.filename:
+            uploads["passport"] = (form.passport_upload.data, "Passport")
         for file_storage, label in uploads.values():
             if not _validate_upload(file_storage, label):
                 return redirect(url_for("public.register"))
@@ -184,8 +187,8 @@ def register():
             absher_number=absher_number,
             previous_sponsor_number=previous_sponsor_number,
             iqama_card_upload=saved_filenames["iqama"],
-            driving_license_upload=saved_filenames["license"],
-            passport_upload=saved_filenames["passport"],
+            driving_license_upload=saved_filenames.get("license"),
+            passport_upload=saved_filenames.get("passport"),
             branch_id=_dammam_branch_id(),
             onboarding_stage="Ops Manager",
             driver_type_id=1,
