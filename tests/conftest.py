@@ -19,7 +19,7 @@ def app(tmp_path_factory):
     upload_dir = tmp_path_factory.mktemp("uploads")
     os.environ["UPLOAD_FOLDER"] = str(upload_dir)
     test_app = create_app()
-    test_app.config.update(TESTING=True)
+    test_app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
 
     with test_app.app_context():
         if db.engine.url.get_backend_name() != "sqlite":
