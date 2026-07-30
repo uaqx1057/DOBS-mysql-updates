@@ -10,7 +10,8 @@ from datetime import datetime
 from io import BytesIO
 import os
 from utils.email_utils import send_password_change_email
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import generate_password_hash
+from utils.passwords import verify_password
 from werkzeug.utils import secure_filename
 from services.file_storage import save_upload, validate_upload
 from services.admin_service import (
@@ -1072,7 +1073,7 @@ def change_password():
     current_password = form.current_password.data
     new_password = form.new_password.data
 
-    if not check_password_hash(current_user.password, current_password):
+    if not verify_password(current_user.password, current_password):
         flash("Current password is incorrect.", "danger")
         return redirect(url_for("admin.dashboard"))
 

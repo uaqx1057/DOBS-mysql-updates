@@ -2,9 +2,10 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, current_app, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
 from sqlalchemy.exc import OperationalError
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import generate_password_hash
 from datetime import datetime, timedelta
 import re
+from utils.passwords import verify_password
 import secrets
 
 from forms.auth import LoginForm
@@ -70,7 +71,7 @@ def login():
             flash("Account locked. Try again later.", "danger")
             return render_template("login.html", form=form), 429
 
-        if not user or not check_password_hash(user.password, password):
+        if not user or not verify_password(user.password, password):
             if user:
                 locked = _register_failed_login(user)
                 if locked:

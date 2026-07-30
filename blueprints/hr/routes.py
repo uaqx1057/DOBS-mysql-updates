@@ -11,7 +11,8 @@ from datetime import datetime
 import os
 import sqlalchemy as sa
 from werkzeug.utils import secure_filename
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import generate_password_hash
+from utils.passwords import verify_password
 from sqlalchemy.exc import IntegrityError
 
 hr_bp = Blueprint("hr", __name__, url_prefix='/hr')
@@ -782,7 +783,7 @@ def change_password():
     new_password = request.form["new_password"]
     confirm_password = request.form["confirm_password"]
 
-    if not check_password_hash(current_user.password, current_password):
+    if not verify_password(current_user.password, current_password):
         flash("Current password is incorrect.", "danger")
         return redirect(url_for("hr.dashboard_hr"))
 

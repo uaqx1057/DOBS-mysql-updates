@@ -3,7 +3,8 @@ from flask_login import login_required, current_user
 from models import Driver, User, BusinessDriver, BusinessID, Offboarding, DriverBusinessIDS
 from extensions import db, mail, limiter
 from flask_mail import Message
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import generate_password_hash
+from utils.passwords import verify_password
 from datetime import datetime
 from utils.email_utils import send_password_change_email
 from sqlalchemy import func, or_
@@ -397,7 +398,7 @@ def change_password():
     new_password = form.new_password.data
     confirm_password = form.confirm_password.data
 
-    if not check_password_hash(current_user.password, form.current_password.data):
+    if not verify_password(current_user.password, form.current_password.data):
         flash("❌ Current password is incorrect.", "danger")
         return redirect(url_for("ops_supervisor.dashboard_ops_supervisor"))
 

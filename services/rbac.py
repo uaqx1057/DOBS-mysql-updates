@@ -38,7 +38,13 @@ def user_role_names(user) -> set:
 def user_has_role(user, *role_names) -> bool:
     if not role_names:
         return True
-    return bool(user_role_names(user) & set(role_names))
+
+    def normalize(value) -> str:
+        return "".join(char for char in str(value).casefold() if char.isalnum())
+
+    held_roles = {normalize(name) for name in user_role_names(user)}
+    required_roles = {normalize(name) for name in role_names}
+    return bool(held_roles & required_roles)
 
 
 def user_can_access_dashboard(user, endpoint_name: str) -> bool:

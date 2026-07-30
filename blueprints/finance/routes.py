@@ -4,7 +4,8 @@ from datetime import datetime, date, timedelta
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import generate_password_hash
+from utils.passwords import verify_password
 from flask_mail import Message
 from sqlalchemy import exists
 from sqlalchemy import or_
@@ -411,7 +412,7 @@ def change_password():
     new_password = form.new_password.data
     confirm_password = form.confirm_password.data
 
-    if not check_password_hash(current_user.password, form.current_password.data):
+    if not verify_password(current_user.password, form.current_password.data):
         flash("Current password is incorrect.", "danger")
         return redirect(url_for("finance.dashboard_finance"))
 
