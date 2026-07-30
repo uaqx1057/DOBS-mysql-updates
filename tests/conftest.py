@@ -1,5 +1,10 @@
 import os
 
+# This must be forced before importing the application. Using setdefault here
+# is unsafe because a shell/service DATABASE_URI can otherwise leak into pytest.
+os.environ["DATABASE_URI"] = "sqlite:///:memory:"
+os.environ["WTF_CSRF_ENABLED"] = "false"
+
 import pytest
 from werkzeug.security import generate_password_hash
 
@@ -11,14 +16,16 @@ from models import User
 @pytest.fixture(scope="session")
 def app(tmp_path_factory):
     # Isolate tests to an in-memory DB and disable CSRF for simple client tests
-    os.environ.setdefault("DATABASE_URI", "sqlite:///:memory:")
-    os.environ.setdefault("WTF_CSRF_ENABLED", "false")
     upload_dir = tmp_path_factory.mktemp("uploads")
-    os.environ.setdefault("UPLOAD_FOLDER", str(upload_dir))
+    os.environ["UPLOAD_FOLDER"] = str(upload_dir)
     test_app = create_app()
     test_app.config.update(TESTING=True)
 
     with test_app.app_context():
+        if db.engine.url.get_backend_name() != "sqlite":
+            raise RuntimeError(
+                f"Refusing to run tests against non-SQLite database: {db.engine.url.render_as_string(hide_password=True)}"
+            )
         db.create_all()
     yield test_app
 

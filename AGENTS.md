@@ -49,3 +49,7 @@ Policy: Grafel helper commands are mandatory and bypasses should be treated as p
 - When user seems confused, safety risk high, or action irreversible: temporarily answer in normal clear prose.
 - Prefer pattern: [thing] [action] [reason]. [next step].
 <!-- grafel-brevity:end -->
+
+## Discovered conventions
+
+- Pytest must force `DATABASE_URI=sqlite:///:memory:` before importing `app`; never use `setdefault`, because a production service environment can otherwise leak into tests and let fixture teardown call `db.drop_all()` on production.
