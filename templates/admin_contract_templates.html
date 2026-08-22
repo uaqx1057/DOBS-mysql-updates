@@ -149,7 +149,15 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md-4"><label class="form-label">{{ tr('Driver Type ID (blank = any)', 'رقم نوع السائق (فارغ = أي)') }}</label>{{ contract_form.driver_type_id(class_="form-control") }}</div>
+    <div class="col-md-4">
+      <label class="form-label">{{ tr('Driver Type (blank = any)', 'نوع السائق (فارغ = أي)') }}</label>
+      <select name="driver_type_id" class="form-select">
+        <option value="">- {{ tr('Any', 'أي') }} -</option>
+        {% for dtype in driver_types %}
+        <option value="{{ dtype.id }}" {% if editing_template and editing_template.driver_type_id == dtype.id %}selected{% endif %}>{{ dtype.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
 
     <div class="col-12 pt-2">
       <h5 class="fs-6 fw-semibold text-secondary text-uppercase mb-3">{{ tr('First Party Details', 'بيانات الطرف الأول') }}</h5>

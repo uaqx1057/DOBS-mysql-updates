@@ -36,11 +36,16 @@ from models import Role, Permission, RolePermission, UserRole, UserPermission
 from services.rbac import (
     grant_role, revoke_role, set_permission_override, clear_permission_override,
     role_permission_codes, set_role_permissions, user_can_access_dashboard,
-    require_permission, user_has_permission,
+    require_permission, user_has_permission, user_has_role,
 )
 from services import impersonation
 from services.impersonation import ImpersonationError
-from services.contracts import render_contract_template_preview
+from services.contracts import (
+    render_contract_template_preview,
+    generated_contract_links,
+    generated_promissory_link,
+    signed_promissory_link,
+)
 from blueprints.auth.routes import _post_login_redirect
 from . import admin_bp
 
@@ -500,6 +505,16 @@ def dashboard():
                 "updated_at": offboarding_record.updated_at.isoformat() if offboarding_record.updated_at else None,
             })
         data["records"] = records
+
+        # Contract-pack info only matters once a driver is fully onboarded -
+        # skip the extra queries for every other tab's rows.
+        if normalized_stage == "Completed":
+            data["generated_contracts"] = generated_contract_links(d)
+            data["generated_promissory_note"] = generated_promissory_link(d)
+            data["signed_promissory_note"] = signed_promissory_link(d)
+            data["generate_contract_pack_url"] = url_for("hr.generate_contract_pack_completed", driver_id=d.id)
+            data["upload_signed_promissory_url"] = url_for("hr.upload_signed_promissory_note", driver_id=d.id)
+
         return data
 
 
@@ -597,6 +612,10 @@ def dashboard():
         onboarding_stages=ONBOARDING_STAGES,
         onboarding_filter_stages=onboarding_filter_stages,
         offboarding_filter_stages=offboarding_filter_stages,
+        can_manage_completed_contracts=(
+            user_has_permission(current_user, "onboarding.completed.manage_contracts")
+            or user_has_role(current_user, "Admin", "SuperAdmin")
+        ),
     )
 
 
@@ -872,6 +891,46 @@ def delete_driver(driver_id):
         flash(f"Error deleting driver: {str(e)}", "danger")
 
     return redirect(url_for("admin.dashboard"))
+
+
+# -------------------------
+# Delete Offboarding Record (keeps the driver - just cancels/removes the
+# offboarding in progress, e.g. one started by mistake or stuck)
+# -------------------------
+@admin_bp.route("/offboarding/<int:offboarding_id>/delete", methods=["POST"])
+@login_required
+def delete_offboarding_record(offboarding_id):
+    if not user_has_role(current_user, "Admin", "SuperAdmin"):
+        return "Forbidden", 403
+
+    form = CSRFOnlyForm()
+    if not form.validate_on_submit():
+        flash("Invalid request.", "danger")
+        return redirect(url_for("admin.dashboard"))
+
+    record = Offboarding.query.get_or_404(offboarding_id)
+    driver = record.driver
+    driver_name = driver.name if driver else "driver"
+
+    # Clear the legacy Driver-level flags too, so nothing lingers pointing
+    # at an offboarding that no longer exists (same cleanup
+    # ops_manager.reject_offboarding does when it discards a request).
+    if driver:
+        driver.offboard_request = False
+        driver.offboard_requested_by = None
+        driver.offboard_reason = None
+        driver.offboard_requested_at = None
+
+    try:
+        db.session.delete(record)
+        db.session.commit()
+        flash(f"Offboarding record deleted for {driver_name}.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error deleting offboarding record: {e}", "danger")
+
+    return redirect(url_for("admin.dashboard"))
+
 
 # -------------------------
 # Add/Edit/Delete Users (unchanged)
@@ -1157,6 +1216,7 @@ def contract_templates():
         "admin_contract_templates.html",
         contract_templates=templates,
         businesses=_cached_businesses(),
+        driver_types=DriverType.query.filter(DriverType.deleted_at.is_(None)).order_by(DriverType.name).all(),
         contract_form=ContractTemplateForm(obj=form_seed),
         editing_template=editing_template,
         show_contract_form=show_contract_form,

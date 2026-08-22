@@ -1,10 +1,12 @@
 # blueprints/hr/routes.py
+from functools import wraps
+
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, current_app, send_from_directory, abort
 from flask_login import login_required, current_user
 from models import Driver, User, Offboarding, DriverTypeSettings, DriverDocument, SharedGeneratedDriverContract
 from extensions import db, mail, csrf
 from services.hr_service import process_hr_approval, save_transfer_proof, send_rejection_email
-from services.rbac import require_permission, user_can_access_dashboard, user_has_permission
+from services.rbac import require_permission, user_can_access_dashboard, user_has_permission, user_has_role
 from services.file_storage import save_to_shared_storage
 from flask_mail import Message
 from datetime import datetime
@@ -66,40 +68,41 @@ def serve_shared_document(relative_path):
 
 
 def _generated_contract_links(driver: Driver) -> list[dict]:
-    rows = (
-        SharedGeneratedDriverContract.query
-        .filter_by(driver_id=driver.id)
-        .order_by(SharedGeneratedDriverContract.generated_at.desc(), SharedGeneratedDriverContract.id.desc())
-        .all()
-    )
-    return [
-        {
-            "id": row.id,
-            "reference_number": row.reference_number,
-            "name": row.original_name or row.reference_number,
-            "url": _shared_document_url(row.file_path),
-            "business": row.business.name if row.business else "Generic",
-            "generated_at": row.generated_at.isoformat() if row.generated_at else None,
-        }
-        for row in rows
-    ]
+    from services import contracts as contracts_service
+    return contracts_service.generated_contract_links(driver)
 
 
 def _generated_promissory_link(driver: Driver) -> dict | None:
-    note = (
-        DriverDocument.query
-        .filter_by(driver_id=driver.id, document_type="other", notes="PromissoryNote")
-        .order_by(DriverDocument.created_at.desc(), DriverDocument.id.desc())
-        .first()
+    from services import contracts as contracts_service
+    return contracts_service.generated_promissory_link(driver)
+
+
+def _signed_promissory_link(driver: Driver) -> dict | None:
+    from services import contracts as contracts_service
+    return contracts_service.signed_promissory_link(driver)
+
+
+def _can_manage_completed_contracts(user) -> bool:
+    """Retroactive contract-pack generation/upload for drivers who already
+    finished onboarding (e.g. pre-dating the system) is gated by a dedicated
+    permission for HR, OR the legacy Admin/SuperAdmin role check Admin's
+    dashboard already uses everywhere else - not onboarding.hr.approve,
+    which is semantically tied to the in-flight HR approval step."""
+    return (
+        user_has_permission(user, "onboarding.completed.manage_contracts")
+        or user_has_role(user, "Admin", "SuperAdmin")
     )
-    if not note:
-        return None
-    return {
-        "id": note.id,
-        "name": note.original_name or note.notes or "Promissory Note",
-        "url": _shared_document_url(note.file_path),
-        "generated_at": note.created_at.isoformat() if note.created_at else None,
-    }
+
+
+def _require_completed_contract_access(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not current_user.is_authenticated:
+            abort(401)
+        if not _can_manage_completed_contracts(current_user):
+            abort(403)
+        return fn(*args, **kwargs)
+    return wrapper
 
 def _serialize_driver(d): 
     return {
@@ -143,6 +146,9 @@ def _serialize_driver(d):
         "qiwa_contract_file": d.qiwa_contract_file,
         "generated_contracts": _generated_contract_links(d),
         "generated_promissory_note": _generated_promissory_link(d),
+        "signed_promissory_note": _signed_promissory_link(d),
+        "generate_contract_pack_url": url_for("hr.generate_contract_pack_completed", driver_id=d.id),
+        "upload_signed_promissory_url": url_for("hr.upload_signed_promissory_note", driver_id=d.id),
     }
 
 
@@ -275,11 +281,12 @@ def dashboard_hr():
     # Completed Onboarded tab: onboarding finished and never entered offboarding at all
     # (once offboarding starts - even mid-process - the driver belongs under the
     # offboarding tabs instead, not here).
-    completed_onboarded_drivers = [
+    completed_onboarded_driver_records = [
         d for d in _driver_search(Driver.query.filter(Driver.onboarding_stage == "Completed"))
             .order_by(Driver.name.asc()).all()
         if d.id not in offboarding_driver_ids
     ]
+    completed_onboarded_drivers = [_serialize_driver(d) for d in completed_onboarded_driver_records]
     total_completed_onboarded = len(completed_onboarded_drivers)
 
     # Rejected tab: drivers rejected during onboarding (Ops Manager or HR first pass).
@@ -321,6 +328,7 @@ def dashboard_hr():
         can_approve_onboarding=user_has_permission(current_user, "onboarding.hr.approve"),
         can_complete_transfer=user_has_permission(current_user, "onboarding.hr_final.complete"),
         can_finalize_offboarding=user_has_permission(current_user, "offboarding.hr.finalize"),
+        can_manage_completed_contracts=_can_manage_completed_contracts(current_user),
         qiwa_driver_type_ids=qiwa_driver_type_ids,
     )
 
@@ -436,6 +444,132 @@ def add_contract_manual(driver_id):
         flash(f"Error adding contract: {exc}", "danger")
 
     return redirect(url_for("hr.dashboard_hr"))
+
+
+# -------------------------
+# Retroactive Contract Pack (drivers who already finished onboarding, e.g.
+# pre-dating the system, without ever going through the HR-stage flow above)
+# -------------------------
+@hr_bp.route("/completed/<int:driver_id>/generate_contract_pack", methods=["POST"])
+@login_required
+@_require_completed_contract_access
+def generate_contract_pack_completed(driver_id):
+    driver = Driver.query.get_or_404(driver_id)
+
+    if driver.onboarding_stage != "Completed":
+        flash(f"Driver is not fully onboarded yet (current: {driver.onboarding_stage}).", "warning")
+        return redirect(request.referrer or url_for("hr.dashboard_hr"))
+
+    try:
+        from services import contracts
+        contracts.generate_driver_contracts(driver, uploaded_by_id=current_user.id)
+        contracts.generate_promissory_note(driver, uploaded_by_id=current_user.id)
+        db.session.commit()
+        flash(f"Contract pack generated for {driver.name}. Print it, collect signatures, then upload the signed copies here.", "success")
+    except contracts.ContractTemplateMissingError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Retroactive contract pack generation failed for driver_id=%s", driver.id)
+        flash(f"Error generating contract pack: {exc}", "danger")
+
+    return redirect(request.referrer or url_for("hr.dashboard_hr"))
+
+
+@hr_bp.route("/completed/<int:driver_id>/upload_signed_contract/<int:contract_id>", methods=["POST"])
+@login_required
+@_require_completed_contract_access
+def upload_signed_contract(driver_id, contract_id):
+    driver = Driver.query.get_or_404(driver_id)
+    record = SharedGeneratedDriverContract.query.filter_by(id=contract_id, driver_id=driver.id).first_or_404()
+
+    uploaded_file = request.files.get("signed_file")
+    if not uploaded_file or not uploaded_file.filename:
+        flash("Please choose the signed copy to upload.", "danger")
+        return redirect(request.referrer or url_for("hr.dashboard_hr"))
+
+    if not _allowed_filename(uploaded_file.filename):
+        flash("Invalid file type. Only JPG, PNG, or PDF are allowed.", "danger")
+        return redirect(request.referrer or url_for("hr.dashboard_hr"))
+
+    max_bytes = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
+    uploaded_file.stream.seek(0, os.SEEK_END)
+    size = uploaded_file.stream.tell()
+    uploaded_file.stream.seek(0)
+    if size > max_bytes:
+        flash(f"File too large. Maximum {max_bytes // (1024 * 1024)} MB.", "danger")
+        return redirect(request.referrer or url_for("hr.dashboard_hr"))
+
+    try:
+        shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH") or current_app.config.get("UPLOAD_FOLDER")
+        filename = secure_filename(uploaded_file.filename)
+        relative_path = save_to_shared_storage(uploaded_file, driver.id, "contract", shared_root, filename=filename)
+
+        record.signed_status = "signed"
+        record.signed_at = datetime.utcnow()
+        record.signed_copy_path = relative_path
+        db.session.commit()
+        flash(f"Signed contract copy saved for {driver.name}.", "success")
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Signed contract upload failed for driver_id=%s contract_id=%s", driver.id, contract_id)
+        flash(f"Error uploading signed contract: {exc}", "danger")
+
+    return redirect(request.referrer or url_for("hr.dashboard_hr"))
+
+
+@hr_bp.route("/completed/<int:driver_id>/upload_signed_promissory_note", methods=["POST"])
+@login_required
+@_require_completed_contract_access
+def upload_signed_promissory_note(driver_id):
+    driver = Driver.query.get_or_404(driver_id)
+
+    if not _generated_promissory_link(driver):
+        flash("Generate the contract pack first before uploading a signed promissory note.", "danger")
+        return redirect(request.referrer or url_for("hr.dashboard_hr"))
+
+    uploaded_file = request.files.get("signed_file")
+    if not uploaded_file or not uploaded_file.filename:
+        flash("Please choose the signed copy to upload.", "danger")
+        return redirect(request.referrer or url_for("hr.dashboard_hr"))
+
+    if not _allowed_filename(uploaded_file.filename):
+        flash("Invalid file type. Only JPG, PNG, or PDF are allowed.", "danger")
+        return redirect(request.referrer or url_for("hr.dashboard_hr"))
+
+    max_bytes = current_app.config.get("MAX_CONTENT_LENGTH", 16 * 1024 * 1024)
+    uploaded_file.stream.seek(0, os.SEEK_END)
+    size = uploaded_file.stream.tell()
+    uploaded_file.stream.seek(0)
+    if size > max_bytes:
+        flash(f"File too large. Maximum {max_bytes // (1024 * 1024)} MB.", "danger")
+        return redirect(request.referrer or url_for("hr.dashboard_hr"))
+
+    try:
+        shared_root = current_app.config.get("DRIVER_DOCUMENT_PATH") or current_app.config.get("UPLOAD_FOLDER")
+        filename = secure_filename(uploaded_file.filename)
+        relative_path = save_to_shared_storage(uploaded_file, driver.id, "contract", shared_root, filename=filename)
+
+        doc = DriverDocument(
+            driver_id=driver.id,
+            document_type="other",
+            file_path=relative_path,
+            original_name=filename,
+            file_size=size,
+            uploaded_from="dobs",
+            uploaded_by=current_user.id,
+            notes="PromissoryNote-Signed",
+        )
+        db.session.add(doc)
+        db.session.commit()
+        flash(f"Signed promissory note saved for {driver.name}.", "success")
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception("Signed promissory note upload failed for driver_id=%s", driver.id)
+        flash(f"Error uploading signed promissory note: {exc}", "danger")
+
+    return redirect(request.referrer or url_for("hr.dashboard_hr"))
 
 
 @hr_bp.route("/approve_driver/<int:driver_id>", methods=["POST"])

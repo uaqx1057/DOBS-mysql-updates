@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from flask import current_app
+from flask import current_app, url_for
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
@@ -1115,6 +1115,108 @@ def _store_generated_contract_record(driver: Driver, template: ContractTemplate,
     )
     db.session.add(record)
     return record
+
+
+def shared_document_url(relative_path: str | None) -> str:
+    """Generated/manually-added contracts and promissory notes live in
+    shared storage, served via the HR blueprint's route regardless of which
+    dashboard (HR or Admin) is showing the link."""
+    if not relative_path:
+        return ""
+    return url_for("hr.serve_shared_document", relative_path=relative_path)
+
+
+def _legacy_static_upload_url(relative_path: str | None) -> str:
+    """company_contract_file/promissory_note_file etc. are the older
+    onboarding-flow upload fields on Driver itself - saved under
+    static/uploads, not shared storage."""
+    if not relative_path:
+        return ""
+    return url_for("static", filename=f"uploads/{relative_path}")
+
+
+def generated_contract_links(driver: Driver) -> list[dict]:
+    # A driver processed through the normal HR-approval flow already has
+    # their signed contract on file via Driver.company_contract_file - that
+    # flow (services/hr_service.py process_hr_approval) never touches
+    # SharedGeneratedDriverContract.signed_status/signed_copy_path (those
+    # columns only get set by the retroactive upload_signed_contract route
+    # added for drivers who *skipped* that flow). Without this fallback,
+    # every normally-onboarded driver would show as "awaiting signature"
+    # and re-prompt for an upload they already made.
+    legacy_signed_url = _legacy_static_upload_url(driver.company_contract_file)
+
+    rows = (
+        SharedGeneratedDriverContract.query
+        .filter_by(driver_id=driver.id)
+        .order_by(SharedGeneratedDriverContract.generated_at.desc(), SharedGeneratedDriverContract.id.desc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "reference_number": row.reference_number,
+            "name": row.original_name or row.reference_number,
+            "url": shared_document_url(row.file_path),
+            "business": row.business.name if row.business else "Generic",
+            "generated_at": row.generated_at.isoformat() if row.generated_at else None,
+            "signed_status": "signed" if (row.signed_status == "signed" or legacy_signed_url) else row.signed_status,
+            "signed_at": row.signed_at.isoformat() if row.signed_at else None,
+            "signed_copy_url": shared_document_url(row.signed_copy_path) or legacy_signed_url,
+            "upload_signed_url": url_for("hr.upload_signed_contract", driver_id=driver.id, contract_id=row.id),
+        }
+        for row in rows
+    ]
+
+
+def generated_promissory_link(driver: Driver) -> dict | None:
+    note = (
+        DriverDocument.query
+        .filter_by(driver_id=driver.id, document_type="other", notes="PromissoryNote")
+        .order_by(DriverDocument.created_at.desc(), DriverDocument.id.desc())
+        .first()
+    )
+    if not note:
+        return None
+    return {
+        "id": note.id,
+        "name": note.original_name or note.notes or "Promissory Note",
+        "url": shared_document_url(note.file_path),
+        "generated_at": note.created_at.isoformat() if note.created_at else None,
+    }
+
+
+def signed_promissory_link(driver: Driver) -> dict | None:
+    """Signed promissory note upload - unlike SharedGeneratedDriverContract,
+    DriverDocument has no signed_status/signed_at columns, so the signed
+    copy is just a second DriverDocument tagged distinctly by notes, same
+    convention as the generated one above."""
+    note = (
+        DriverDocument.query
+        .filter_by(driver_id=driver.id, document_type="other", notes="PromissoryNote-Signed")
+        .order_by(DriverDocument.created_at.desc(), DriverDocument.id.desc())
+        .first()
+    )
+    if note:
+        return {
+            "id": note.id,
+            "name": note.original_name or "Signed Promissory Note",
+            "url": shared_document_url(note.file_path),
+            "uploaded_at": note.created_at.isoformat() if note.created_at else None,
+        }
+
+    # Same fallback as generated_contract_links() above: the normal HR
+    # approval flow already collected the signed promissory note into
+    # Driver.promissory_note_file, just never tagged as "PromissoryNote-Signed".
+    if driver.promissory_note_file:
+        return {
+            "id": None,
+            "name": "Signed Promissory Note",
+            "url": _legacy_static_upload_url(driver.promissory_note_file),
+            "uploaded_at": None,
+        }
+
+    return None
 
 
 def render_contract_template_preview(template: ContractTemplate) -> bytes:

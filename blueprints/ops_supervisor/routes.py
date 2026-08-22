@@ -88,13 +88,15 @@ def dashboard_ops_supervisor():
         )
     onboarding_drivers = onboarding_drivers_query.all()
 
-    # Latest offboarding requests
+    # Latest offboarding requests. Only "OpsSupervisor" stage records belong
+    # here - "Requested" is still awaiting Ops Manager approval and has no
+    # action Ops Supervisor can take on it yet.
     latest_requests_subq = (
         db.session.query(
             Offboarding.driver_id,
             func.max(Offboarding.requested_at).label("latest_request")
         )
-        .filter(Offboarding.status.in_(["Requested", "OpsSupervisor"]))
+        .filter(Offboarding.status == "OpsSupervisor")
         .group_by(Offboarding.driver_id)
         .subquery()
     )
@@ -436,7 +438,7 @@ def offboarding_dashboard():
             Offboarding.driver_id,
             func.max(Offboarding.requested_at).label("latest_request")
         )
-        .filter(Offboarding.status.in_(["Requested", "OpsSupervisor"]))
+        .filter(Offboarding.status == "OpsSupervisor")
         .group_by(Offboarding.driver_id)
         .subquery()
     )

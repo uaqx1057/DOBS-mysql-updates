@@ -85,6 +85,9 @@
       <div class="d-flex gap-2 mt-2">
         <button type="button" class="btn btn-sm btn-outline-primary" data-view-driver>{{ tr('View', 'عرض') }}</button>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-edit-driver>{{ tr('Edit', 'تعديل') }}</button>
+        {% if can_manage_completed_contracts %}
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-contract-pack>{{ tr('Contract Pack', 'حزمة العقود') }}</button>
+        {% endif %}
         <form method="POST" action="{{ url_for('admin.delete_driver', driver_id=driver.id) }}" onclick="event.stopPropagation()">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('{{ tr('Delete this driver?', 'حذف هذا السائق؟') }}')">{{ tr('Delete', 'حذف') }}</button>
@@ -304,11 +307,32 @@
   </div>
 </div>
 
+<!-- ===================== Retroactive contract pack modal (Completed drivers) ===================== -->
+<div class="modal" id="completedContractModal">
+  <div class="modal-content" style="max-width:640px;">
+    <div class="modal-header"><h3 id="completedContractTitle">{{ tr('Contract Pack', 'حزمة العقود') }}</h3><button class="modal-close" data-modal-close>&times;</button></div>
+    <div class="modal-body">
+      <p class="text-secondary small">{{ tr('For drivers who finished onboarding without a system-generated contract. Generate the pack, print and sign it outside the system, then upload the signed copies here.', 'للسائقين الذين أنهوا الانضمام دون عقد تم إنشاؤه بواسطة النظام. أنشئ الحزمة، اطبعها ووقّعها خارج النظام، ثم ارفع النسخ الموقعة هنا.') }}</p>
+      <div id="completedContractBody"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Close', 'إغلاق') }}</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===================== Offboarding progress modal ===================== -->
 <div class="modal" id="offboardingProgressModal">
   <div class="modal-content">
     <div class="modal-header"><h3>{{ tr('Offboarding Progress', 'تقدم الخروج') }}</h3><button class="modal-close" data-modal-close>&times;</button></div>
     <div class="modal-body" id="offboardingTimeline"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline-secondary" data-modal-close>{{ tr('Close', 'إغلاق') }}</button>
+      <form id="deleteOffboardingForm" method="POST" onsubmit="return confirm({{ tr('Delete this offboarding record? The driver stays, but all offboarding progress on it will be lost.', 'حذف سجل الخروج هذا؟ سيبقى السائق، لكن سيتم فقدان كل تقدم الخروج.') | tojson }});">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-danger" id="deleteOffboardingBtn">{{ tr('Delete Offboard Record', 'حذف سجل الخروج') }}</button>
+      </form>
+    </div>
   </div>
 </div>
 
@@ -372,6 +396,92 @@
       document.getElementById('driverModalTitle').textContent = {{ tr('Edit Driver', 'تعديل سائق') | tojson }} + ' — ' + (d.name || '');
       document.getElementById('driverFormSubmit').textContent = {{ tr('Save Changes', 'حفظ التغييرات') | tojson }};
       DobsUI.openModal('driverModal');
+    });
+  });
+
+  var canManageCompletedContracts = {{ can_manage_completed_contracts | tojson }};
+  var csrfTokenValue = {{ csrf_token() | tojson }};
+
+  function renderCompletedContractPack(driver) {
+    var body = document.getElementById('completedContractBody');
+    if (!body) return;
+    document.getElementById('completedContractTitle').textContent = ({{ tr('Contract Pack', 'حزمة العقود') | tojson }}) + ' — ' + (driver.name || '');
+
+    var contracts = driver.generated_contracts || [];
+    var promissory = driver.generated_promissory_note || null;
+    var signedPromissory = driver.signed_promissory_note || null;
+
+    if (!contracts.length && !promissory) {
+      var html = '<div class="text-muted mb-3">' + esc({{ tr('No contract pack generated yet.', 'لم يتم إنشاء حزمة العقود بعد.') | tojson }}) + '</div>';
+      if (canManageCompletedContracts) {
+        html += '<form method="POST" action="' + driver.generate_contract_pack_url + '">' +
+          '<input type="hidden" name="csrf_token" value="' + csrfTokenValue + '">' +
+          '<button type="submit" class="btn btn-primary btn-sm">' + esc({{ tr('Generate Contract Pack', 'إنشاء حزمة العقود') | tojson }}) + '</button>' +
+          '</form>';
+      }
+      body.innerHTML = html;
+      return;
+    }
+
+    var signedLabel = {{ tr('Signed', 'موقّع') | tojson }};
+    var awaitingLabel = {{ tr('Awaiting signature', 'بانتظار التوقيع') | tojson }};
+    var viewSignedLabel = {{ tr('View signed copy', 'عرض النسخة الموقعة') | tojson }};
+    var uploadLabel = {{ tr('Upload Signed Copy', 'رفع النسخة الموقعة') | tojson }};
+    var rows = [];
+
+    contracts.forEach(function (c) {
+      var statusBadge = c.signed_status === 'signed'
+        ? '<span class="badge-soft success">' + esc(signedLabel) + '</span>'
+        : '<span class="badge-soft warning">' + esc(awaitingLabel) + '</span>';
+      var row = '<div class="p-2 mb-2" style="border:1px solid var(--border-color); border-radius:var(--radius-md);">' +
+        '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2">' +
+        '<a href="' + c.url + '" target="_blank" rel="noopener">' + esc(c.name || c.reference_number) + '</a>' +
+        ' <span class="text-muted small">(' + esc(c.business || 'Generic') + ')</span> ' + statusBadge +
+        '</div>';
+      if (c.signed_status === 'signed' && c.signed_copy_url) {
+        row += '<div class="small mt-1"><a href="' + c.signed_copy_url + '" target="_blank" rel="noopener">' + esc(viewSignedLabel) + '</a></div>';
+      } else if (canManageCompletedContracts) {
+        row += '<form method="POST" enctype="multipart/form-data" action="' + c.upload_signed_url + '" class="d-flex align-items-center gap-2 flex-wrap mt-2">' +
+          '<input type="hidden" name="csrf_token" value="' + csrfTokenValue + '">' +
+          '<input type="file" class="form-control form-control-sm" style="max-width:220px;" name="signed_file" accept=".jpg,.jpeg,.png,.pdf" required>' +
+          '<button type="submit" class="btn btn-outline-primary btn-sm">' + esc(uploadLabel) + '</button>' +
+          '</form>';
+      }
+      row += '</div>';
+      rows.push(row);
+    });
+
+    if (promissory) {
+      var pStatusBadge = signedPromissory
+        ? '<span class="badge-soft success">' + esc(signedLabel) + '</span>'
+        : '<span class="badge-soft warning">' + esc(awaitingLabel) + '</span>';
+      var pRow = '<div class="p-2 mb-2" style="border:1px solid var(--border-color); border-radius:var(--radius-md);">' +
+        '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2">' +
+        '<a href="' + promissory.url + '" target="_blank" rel="noopener">' + esc(promissory.name || 'Promissory Note') + '</a> ' + pStatusBadge +
+        '</div>';
+      if (signedPromissory && signedPromissory.url) {
+        pRow += '<div class="small mt-1"><a href="' + signedPromissory.url + '" target="_blank" rel="noopener">' + esc(viewSignedLabel) + '</a></div>';
+      } else if (canManageCompletedContracts) {
+        pRow += '<form method="POST" enctype="multipart/form-data" action="' + driver.upload_signed_promissory_url + '" class="d-flex align-items-center gap-2 flex-wrap mt-2">' +
+          '<input type="hidden" name="csrf_token" value="' + csrfTokenValue + '">' +
+          '<input type="file" class="form-control form-control-sm" style="max-width:220px;" name="signed_file" accept=".jpg,.jpeg,.png,.pdf" required>' +
+          '<button type="submit" class="btn btn-outline-primary btn-sm">' + esc(uploadLabel) + '</button>' +
+          '</form>';
+      }
+      pRow += '</div>';
+      rows.push(pRow);
+    }
+
+    body.innerHTML = rows.join('');
+  }
+
+  document.querySelectorAll('[data-contract-pack]').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var card = btn.closest('.driver-card');
+      var d = JSON.parse(card.dataset.driver || '{}');
+      renderCompletedContractPack(d);
+      DobsUI.openModal('completedContractModal');
     });
   });
 
@@ -487,6 +597,14 @@
     card.addEventListener('click', function () {
       var d = JSON.parse(card.dataset.driver || '{}');
       var records = d.records || [];
+      var deleteForm = document.getElementById('deleteOffboardingForm');
+      var deleteBtn = document.getElementById('deleteOffboardingBtn');
+      if (records.length && records[0].status !== 'Completed') {
+        deleteForm.action = '/dashboard/offboarding/' + records[0].id + '/delete';
+        deleteBtn.style.display = '';
+      } else {
+        deleteBtn.style.display = 'none';
+      }
       var html = '<p><strong>{{ tr("Driver","السائق") }}:</strong> ' + esc(d.name) + ' (' + esc(d.iqaama_number || d.iqama_number) + ')</p>';
       if (!records.length) {
         html += '<p class="text-muted">{{ tr("No offboarding details available.", "لا تتوفر تفاصيل عن الخروج.") }}</p>';
