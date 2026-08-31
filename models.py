@@ -323,7 +323,10 @@ class DriverDocument(db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     driver_id     = db.Column(db.Integer, db.ForeignKey("drivers.id"), nullable=False, index=True)
     document_type = db.Column(
-        db.Enum("iqama", "passport", "visa", "license", "medical", "contract", "mobile", "other"),
+        db.Enum(
+            "iqama", "passport", "visa", "license", "medical", "contract",
+            "mobile", "qiwa_contract", "other",
+        ),
         nullable=False,
     )
     file_path     = db.Column(db.String(500), nullable=False)
