@@ -160,6 +160,28 @@ class Driver(db.Model):
     nationality = db.Column(db.String(100), nullable=True)
     absher_number = db.Column(db.String(15), nullable=True)
     previous_sponsor_number = db.Column(db.String(50), nullable=True)
+    # Fields to mirror DMS's driver create form (dms.speedlogi.sa/dms/drivers/create).
+    # DOBS and DMS share the same physical `drivers` table (see
+    # _sync_shared_driver_fields below) - these columns already exist there,
+    # added by DMS's own migrations (create_drivers_table; most recently
+    # 2026_08_23_150000_add_license_type_and_profession_to_drivers_table.php).
+    # DOBS's model just never declared them. No DB-level CHECK constraint on
+    # license_type deliberately: DMS only enforces that enum in its own
+    # Laravel validation layer, not at the DB level - adding one here could
+    # break DMS's own writes to this shared table if it ever inserts a value
+    # outside what DOBS assumes.
+    # sponsor_company_id (linked SponsorCompany entity) and bank_accounts
+    # (repeatable bank/STC Pay sub-form) are NOT included here - DOBS has no
+    # SponsorCompany/DriverBankAccount tables at all, so mirroring those two
+    # would mean introducing new models/relationships, not just new columns.
+    dob = db.Column(db.Date, nullable=True)
+    driver_profession = db.Column(db.String(255), nullable=True)
+    email = db.Column(db.String(120), nullable=True)
+    license_type = db.Column(db.String(20), nullable=True)
+    license_expiry = db.Column(db.Date, nullable=True)
+    passport_no = db.Column(db.String(50), nullable=True)
+    passport_expiry_date = db.Column(db.Date, nullable=True)
+    remarks = db.Column(db.Text, nullable=True)
     iqama_card_upload = db.Column(db.String(200), nullable=True)
     driving_license_upload = db.Column(db.String(200), nullable=True)
     passport_upload = db.Column(db.String(200), nullable=True)

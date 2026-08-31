@@ -133,6 +133,18 @@
                     <option value="3">3</option><option value="4">4</option><option value="5">5</option>
                   </select>
                 </div>
+                <div class="dobs-field-group">
+                  <label class="dobs-label" for="dob">{{ 'Date of Birth' if not is_ar else 'تاريخ الميلاد' }}</label>
+                  <input class="dobs-input" type="date" id="dob" name="dob">
+                </div>
+                <div class="dobs-field-group">
+                  <label class="dobs-label" for="driver_profession">{{ 'Profession' if not is_ar else 'المهنة' }}</label>
+                  <input class="dobs-input" type="text" id="driver_profession" name="driver_profession">
+                </div>
+                <div class="dobs-field-group">
+                  <label class="dobs-label" for="email">{{ 'Email' if not is_ar else 'البريد الإلكتروني' }}</label>
+                  <input class="dobs-input" type="email" id="email" name="email">
+                </div>
                 <div class="dobs-wizard-nav">
                   <span></span>
                   <button type="button" class="dobs-submit" id="wizardNextBtn">{{ 'Next: Documents' if not is_ar else 'التالي: المستندات' }}</button>
@@ -148,9 +160,35 @@
                   <label class="dobs-label" for="driving_license_upload">{{ 'Driving License' if not is_ar else 'رخصة القيادة' }} <span class="dobs-required">*</span></label>
                   <input class="dobs-input" type="file" id="driving_license_upload" name="driving_license_upload" accept=".png,.jpg,.jpeg,.pdf" required>
                 </div>
+                <div class="dobs-field-group" id="license-type-field">
+                  <label class="dobs-label" for="license_type">{{ 'License Type' if not is_ar else 'نوع الرخصة' }}</label>
+                  <select class="dobs-input" id="license_type" name="license_type">
+                    <option value="">- {{ 'Select' if not is_ar else 'اختر' }} -</option>
+                    <option value="Private">{{ 'Private' if not is_ar else 'خاصة' }}</option>
+                    <option value="Commercial">{{ 'Commercial' if not is_ar else 'تجارية' }}</option>
+                    <option value="Heavy">{{ 'Heavy' if not is_ar else 'ثقيلة' }}</option>
+                    <option value="Motorcycle">{{ 'Motorcycle' if not is_ar else 'دراجة نارية' }}</option>
+                  </select>
+                </div>
+                <div class="dobs-field-group" id="license-expiry-field">
+                  <label class="dobs-label" for="license_expiry">{{ 'License Expiry' if not is_ar else 'انتهاء الرخصة' }}</label>
+                  <input class="dobs-input" type="date" id="license_expiry" name="license_expiry">
+                </div>
                 <div class="dobs-field-group">
                   <label class="dobs-label" for="passport_upload">{{ 'Passport (optional)' if not is_ar else 'جواز السفر (اختياري)' }}</label>
                   <input class="dobs-input" type="file" id="passport_upload" name="passport_upload" accept=".png,.jpg,.jpeg,.pdf">
+                </div>
+                <div class="dobs-field-group">
+                  <label class="dobs-label" for="passport_no">{{ 'Passport Number' if not is_ar else 'رقم الجواز' }}</label>
+                  <input class="dobs-input" type="text" id="passport_no" name="passport_no">
+                </div>
+                <div class="dobs-field-group">
+                  <label class="dobs-label" for="passport_expiry_date">{{ 'Passport Expiry' if not is_ar else 'انتهاء الجواز' }}</label>
+                  <input class="dobs-input" type="date" id="passport_expiry_date" name="passport_expiry_date">
+                </div>
+                <div class="dobs-field-group">
+                  <label class="dobs-label" for="remarks">{{ 'Additional Notes (optional)' if not is_ar else 'ملاحظات إضافية (اختياري)' }}</label>
+                  <textarea class="dobs-input" id="remarks" name="remarks" rows="2"></textarea>
                 </div>
                 <div class="dobs-wizard-nav">
                   <button type="button" class="dobs-submit dobs-submit--secondary" id="wizardBackBtn">{{ 'Back' if not is_ar else 'رجوع' }}</button>
@@ -169,12 +207,20 @@
       var hasLicence = document.getElementById('saudi_driving_license');
       var licenceField = document.getElementById('driving-license-field');
       var licenceUpload = document.getElementById('driving_license_upload');
+      var licenceTypeField = document.getElementById('license-type-field');
+      var licenceExpiryField = document.getElementById('license-expiry-field');
 
       function syncLicenceUpload() {
         var licenceRequired = hasLicence.value === 'yes';
         licenceField.style.display = licenceRequired ? '' : 'none';
         licenceUpload.required = licenceRequired;
         if (!licenceRequired) licenceUpload.value = '';
+        licenceTypeField.style.display = licenceRequired ? '' : 'none';
+        licenceExpiryField.style.display = licenceRequired ? '' : 'none';
+        if (!licenceRequired) {
+          document.getElementById('license_type').value = '';
+          document.getElementById('license_expiry').value = '';
+        }
       }
 
       hasLicence.addEventListener('change', syncLicenceUpload);

@@ -213,6 +213,10 @@
           <div class="col-md-4"><label class="form-label">{{ tr('Saudi Driving License', 'رخصة قيادة سعودية') }}</label>
             <select class="form-select" name="saudi_driving_license"><option value="false">{{ tr('No', 'لا') }}</option><option value="true">{{ tr('Yes', 'نعم') }}</option></select>
           </div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Date of Birth', 'تاريخ الميلاد') }}</label><input type="date" class="form-control" name="dob"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Profession', 'المهنة') }}</label><input class="form-control" name="driver_profession"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Email', 'البريد الإلكتروني') }}</label><input type="email" class="form-control" name="email"></div>
+          <div class="col-12"><label class="form-label">{{ tr('Remarks', 'ملاحظات') }}</label><textarea class="form-control" name="remarks" rows="2"></textarea></div>
         </div>
 
           </div>
@@ -284,7 +288,19 @@
         <div class="row g-3">
           <div class="col-md-4"><label class="form-label">{{ tr('Iqama Card', 'بطاقة الإقامة') }}</label><input type="file" class="form-control" name="iqama_card_upload" accept=".jpg,.jpeg,.png,.pdf"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Driving License', 'رخصة القيادة') }}</label><input type="file" class="form-control" name="driving_license_upload" accept=".jpg,.jpeg,.png,.pdf"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('License Type', 'نوع الرخصة') }}</label>
+            <select class="form-select" name="license_type">
+              <option value="">- {{ tr('Select', 'اختر') }} -</option>
+              <option value="Private">{{ tr('Private', 'خاصة') }}</option>
+              <option value="Commercial">{{ tr('Commercial', 'تجارية') }}</option>
+              <option value="Heavy">{{ tr('Heavy', 'ثقيلة') }}</option>
+              <option value="Motorcycle">{{ tr('Motorcycle', 'دراجة نارية') }}</option>
+            </select>
+          </div>
+          <div class="col-md-4"><label class="form-label">{{ tr('License Expiry', 'انتهاء الرخصة') }}</label><input type="date" class="form-control" name="license_expiry"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Passport', 'جواز السفر') }}</label><input type="file" class="form-control" name="passport_upload" accept=".jpg,.jpeg,.png,.pdf"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Passport Number', 'رقم الجواز') }}</label><input class="form-control" name="passport_no"></div>
+          <div class="col-md-4"><label class="form-label">{{ tr('Passport Expiry', 'انتهاء الجواز') }}</label><input type="date" class="form-control" name="passport_expiry_date"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Company Contract File', 'ملف عقد الشركة') }}</label><input type="file" class="form-control" name="company_contract_file" accept=".jpg,.jpeg,.png,.pdf"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Promissory Note File', 'ملف السند الإذني') }}</label><input type="file" class="form-control" name="promissory_note_file" accept=".jpg,.jpeg,.png,.pdf"></div>
           <div class="col-md-4"><label class="form-label">{{ tr('Qiwa Contract File', 'ملف عقد قوى') }}</label><input type="file" class="form-control" name="qiwa_contract_file" accept=".jpg,.jpeg,.png,.pdf"></div>

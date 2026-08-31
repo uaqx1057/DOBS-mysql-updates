@@ -68,6 +68,7 @@ def update_driver_from_form(driver: Driver, form_data, business_ids: Iterable[st
         "iqaama_expiry", "assignment_date", "transfer_fee_paid_at",
         "ops_manager_approved_at", "hr_approved_at", "ops_supervisor_approved_at",
         "fleet_manager_approved_at", "finance_approved_at",
+        "dob", "license_expiry", "passport_expiry_date",
     }
 
     for field in form_data.keys():

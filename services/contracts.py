@@ -1367,17 +1367,35 @@ def _render_promissory_note_form(driver: Driver) -> bytes:
     def field_row(y_top, row_h, label_en_text, value_text, label_ar_text, value_ar_text=None):
         # Two value cells, like the paper form: one after the English label
         # and one before the Arabic label, so the filled data reads from
-        # both language sides.
-        box(left, y_top - row_h, right, y_top)
+        # both language sides. A value that doesn't fit on one line (e.g. a
+        # long driver name) wraps onto extra lines instead of overflowing
+        # into the neighboring cell - the row only grows if the fixed
+        # row_h isn't already tall enough, and everything below it (every
+        # field_row/paragraph_row call chains off the returned y) shifts
+        # down automatically.
+        value_size = 9
+        line_height = value_size + 3  # reproduces the original single-line baseline exactly when line_count == 1
+        cell_pad = 4
         value_mid = (value_left + value_right) / 2
+        en_cell_w = value_mid - value_left - cell_pad * 2
+        ar_cell_w = value_right - value_mid - cell_pad * 2
+
+        ar_source = value_ar_text if value_ar_text is not None else value_text
+        en_lines = _wrap_canvas_text(value_text, font_name, value_size, en_cell_w) if value_text else []
+        ar_lines = _wrap_canvas_text(ar_source, font_name, value_size, ar_cell_w) if value_text and ar_source else []
+        line_count = max(len(en_lines), len(ar_lines), 1)
+        row_h = max(row_h, line_count * line_height + 4)
+
+        box(left, y_top - row_h, right, y_top)
         pdf.line(value_left, y_top - row_h, value_left, y_top)
         pdf.line(value_mid, y_top - row_h, value_mid, y_top)
         pdf.line(value_right, y_top - row_h, value_right, y_top)
         baseline = y_top - row_h / 2 - 3
         en(left + 3, baseline, label_en_text)
         if value_text:
-            en(value_left + 4, baseline, value_text)
-            ar(value_right - 4, baseline, value_ar_text if value_ar_text is not None else value_text)
+            top_baseline = y_top - (row_h - line_count * line_height) / 2 - value_size
+            _draw_wrapped_text(pdf, value_text, value_left + cell_pad, top_baseline, en_cell_w, font_name=font_name, font_size=value_size, line_height=line_height, rtl=False)
+            _draw_wrapped_text(pdf, ar_source, value_mid + cell_pad, top_baseline, ar_cell_w, font_name=font_name, font_size=value_size, line_height=line_height, rtl=True)
         ar(right - 3, baseline, label_ar_text)
         return y_top - row_h
 

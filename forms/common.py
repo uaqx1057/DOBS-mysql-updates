@@ -98,6 +98,22 @@ class AddDriverForm(FlaskForm):
     city = StringField("City", validators=[Optional(), Length(max=100)])
     absher_number = StringField("Absher Number", validators=[Optional(), Length(max=15)])
     previous_sponsor_number = StringField("Previous Sponsor Number", validators=[Optional(), Length(max=50)])
+    # Fields added to mirror DMS's driver create form - see the
+    # 20260827_driver_dms_parity_fields migration for what was deliberately
+    # left out (sponsor_company_id, bank_accounts, language).
+    dob = DateField("Date of Birth", validators=[Optional()], format="%Y-%m-%d")
+    driver_profession = StringField("Profession", validators=[Optional(), Length(max=255)])
+    email = StringField("Email", validators=[Optional(), Email(), Length(max=120)])
+    license_type = SelectField(
+        "License Type",
+        choices=[("", "- Select -"), ("Private", "Private"), ("Commercial", "Commercial"), ("Heavy", "Heavy"), ("Motorcycle", "Motorcycle")],
+        validators=[Optional()],
+        default="",
+    )
+    license_expiry = DateField("License Expiry", validators=[Optional()], format="%Y-%m-%d")
+    passport_no = StringField("Passport Number", validators=[Optional(), Length(max=50)])
+    passport_expiry_date = DateField("Passport Expiry", validators=[Optional()], format="%Y-%m-%d")
+    remarks = TextAreaField("Remarks", validators=[Optional()])
     saudi_driving_license = SelectField(
         "Saudi Driving License",
         choices=[("false", "No"), ("true", "Yes")],
@@ -145,6 +161,23 @@ class PublicRegisterForm(FlaskForm):
         choices=[("no", "No"), ("yes", "Yes")],
         default="no",
     )
+    # Fields added to mirror DMS's driver create form (dms.speedlogi.sa/dms/drivers/create) -
+    # kept Optional here (unlike DMS, which requires dob/email) since this is
+    # the public self-registration entry point and the applicant hasn't been
+    # screened yet; Ops Manager/HR can fill in anything missing later.
+    dob = DateField("Date of Birth", validators=[Optional()], format="%Y-%m-%d")
+    driver_profession = StringField("Profession", validators=[Optional(), Length(max=255)])
+    email = StringField("Email", validators=[Optional(), Email(), Length(max=120)])
+    license_type = SelectField(
+        "License Type",
+        choices=[("", "- Select -"), ("Private", "Private"), ("Commercial", "Commercial"), ("Heavy", "Heavy"), ("Motorcycle", "Motorcycle")],
+        validators=[Optional()],
+        default="",
+    )
+    license_expiry = DateField("License Expiry", validators=[Optional()], format="%Y-%m-%d")
+    passport_no = StringField("Passport Number", validators=[Optional(), Length(max=50)])
+    passport_expiry_date = DateField("Passport Expiry", validators=[Optional()], format="%Y-%m-%d")
+    remarks = TextAreaField("Additional Notes", validators=[Optional()])
     iqama_card_upload = FileField(
         "Iqama Card",
         validators=[FileRequired(message="Iqama card upload is required."), FileAllowed(["png", "jpg", "jpeg", "pdf"], "Images or PDF only")],
